@@ -120,7 +120,9 @@ nav button.active { background: var(--surface-2); color: var(--amber); }
 .teamGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .team { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 18px; display: flex; align-items: center; gap: 14px; transition: transform 0.15s, border-color 0.15s; }
 .team:hover { border-color: var(--muted-2); transform: translateY(-2px); }
-.team .logo { width: 46px; height: 46px; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--amber); flex-shrink: 0; }
+.team .logo { width: 46px; height: 46px; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--amber); flex-shrink: 0; overflow: hidden; }
+.team .logo.hasImg { background: #fff; padding: 6px; }
+.team .logo img { width: 100%; height: 100%; object-fit: contain; }
 .teamInfo h3 { margin: 0; font-size: 14px; font-weight: 700; }
 .teamInfo span { display: block; color: var(--muted); font-size: 11px; margin-top: 5px; font-family: var(--font-mono); }
 .team svg { margin-left: auto; color: var(--muted-2); flex-shrink: 0; }
@@ -238,6 +240,74 @@ button.danger.outline:hover { background: #2b1015; }
 /* ---------- Alt bilgi ---------- */
 footer { margin-top: auto; border-top: 1px solid var(--line); color: var(--muted-2); font-size: 11px; padding: 24px 0; font-family: var(--font-mono); }
 footer span { float: right; color: var(--muted); }
+
+/* ---------- Takım logosu yükleme (admin) ---------- */
+.logoPickLabel { display: flex; align-items: center; gap: 12px; border: 2px dashed var(--line); border-radius: 12px; padding: 12px 16px; cursor: pointer; background: var(--surface-2); transition: border-color 0.15s; }
+.logoPickLabel:hover { border-color: var(--amber); }
+.logoPickLabel input { display: none; }
+.logoPickLabel span { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
+.logoPickLabel img { width: 40px; height: 40px; object-fit: contain; border-radius: 8px; background: #fff; padding: 4px; flex-shrink: 0; }
+
+.adminTeamRow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.adminTeamLogo { width: 28px; height: 28px; border-radius: 7px; background: var(--surface); display: grid; place-items: center; font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--amber); flex-shrink: 0; overflow: hidden; }
+.adminTeamLogo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.adminTeamActions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.tinyUpload { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); color: var(--muted); cursor: pointer; flex-shrink: 0; }
+.tinyUpload:hover { color: var(--amber); border-color: var(--amber); }
+.tinyUpload input { display: none; }
+
+/* ---------- Oyuncu kartları ---------- */
+.cardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
+
+.pcard {
+  position: relative; border-radius: 20px; padding: 20px 18px 18px; min-height: 220px;
+  overflow: hidden; isolation: isolate; border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35); transition: transform 0.2s ease, box-shadow 0.2s ease;
+  display: flex; flex-direction: column;
+}
+.pcard:hover { transform: translateY(-5px) scale(1.015); box-shadow: 0 26px 60px rgba(0, 0, 0, 0.5); }
+
+.pcard-shine {
+  position: absolute; inset: -50%; z-index: 0; pointer-events: none; transform: rotate(8deg);
+  background: linear-gradient(120deg, transparent 32%, rgba(255, 255, 255, 0.16) 48%, transparent 62%);
+}
+
+.pcard-newTag {
+  position: absolute; top: 14px; right: 14px; z-index: 2; background: var(--amber); color: #140d02;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em;
+  padding: 4px 8px; border-radius: 6px;
+}
+
+.pcard-top { position: relative; z-index: 1; display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+.pcard-overall { font-family: var(--font-display); font-size: 44px; font-weight: 800; line-height: 1; }
+.pcard-tier { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; opacity: 0.85; text-transform: uppercase; }
+
+.pcard-name { position: relative; z-index: 1; font-family: var(--font-display); font-size: 20px; font-weight: 700; text-transform: uppercase; line-height: 1.08; margin-bottom: 2px; overflow-wrap: break-word; }
+.pcard-team { position: relative; z-index: 1; font-size: 11px; font-family: var(--font-mono); opacity: 0.8; margin-bottom: auto; }
+
+.pcard-divider { position: relative; z-index: 1; height: 1px; background: rgba(255, 255, 255, 0.2); margin: 14px 0 10px; }
+
+.pcard-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.pcard-stats div { text-align: center; }
+.pcard-stats b { display: block; font-family: var(--font-display); font-size: 17px; font-weight: 700; }
+.pcard-stats span { display: block; font-size: 8.5px; font-family: var(--font-mono); letter-spacing: 0.03em; opacity: 0.7; margin-top: 2px; }
+
+.tier-bronze { color: #f3e2cf; background: linear-gradient(160deg, #9a6a3f, #663f22 55%, #3d2614); }
+.tier-bronze .pcard-overall, .tier-bronze .pcard-tier { color: #ffd9a8; }
+
+.tier-silver { color: #131720; background: linear-gradient(160deg, #d7dce4, #9aa1ac 55%, #656d78); }
+.tier-silver .pcard-overall, .tier-silver .pcard-tier { color: #1c2733; }
+
+.tier-gold { color: #2a1c02; background: linear-gradient(160deg, #ffedb0, #eab74e 55%, #ab7a20); }
+.tier-gold .pcard-overall, .tier-gold .pcard-tier { color: #3a2601; }
+
+.tier-elite { color: #d7d7de; background: linear-gradient(160deg, #302f38, #131318 55%, #050506); border-color: rgba(255, 215, 120, 0.35); }
+.tier-elite .pcard-overall { color: #ffd76b; }
+.tier-elite .pcard-tier { color: #ffb545; }
+
+.tier-icon { color: #3a2f14; background: linear-gradient(160deg, #ffffff, #ece6d8 45%, #cdbc8c 100%); border-color: #d8c58f; }
+.tier-icon .pcard-overall, .tier-icon .pcard-tier { color: #8a6a1f; }
+.tier-icon .pcard-divider { background: rgba(120, 95, 30, 0.28); }
 
 /* ---------- Mobil ---------- */
 @media (max-width: 800px) {

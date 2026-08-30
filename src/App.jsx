@@ -2,17 +2,15 @@ import React, { useMemo, useState, useEffect } from "react";
 import {
   Home, Shield, Trophy, CalendarDays, Upload, Settings, Plus, Trash2,
   ChevronRight, X, Menu, BarChart2, Crosshair, Share2, Hand,
-  ShieldCheck, RotateCcw, Radio
+  ShieldCheck, RotateCcw, Radio, CreditCard, Image as ImageIcon
 } from "lucide-react";
 import { parseMatchHTML, successCount } from "./lib/parseMatch.js";
 
 // Kod her güncellendiğinde bu sürümü artır — tarayıcıdaki eski localStorage
 // verisi otomatik temizlenir ve yeni demo veriler yüklenir.
-const DATA_VERSION = "4";
+const DATA_VERSION = "5";
 
 const INITIAL_TEAMS = [
-  { id: "1", name: "BizSiz FC" },
-  { id: "2", name: "Hamam Zalisko" },
   { id: "3", name: "Metospor FK" },
   { id: "4", name: "Winchester City FC" },
   { id: "5", name: "Relentless" },
@@ -22,57 +20,18 @@ const INITIAL_TEAMS = [
 ];
 
 const INITIAL_FIXTURES = [
-  { id: "f1", date: "Tamamlandı", home: "BizSiz FC", away: "Hamam Zalisko", status: "Tamamlandı", matchId: "sample-1" },
   { id: "f2", date: "Yakında", home: "Metospor FK", away: "Winchester City FC", status: "Yakında" },
   { id: "f3", date: "Yakında", home: "Relentless", away: "Noroshi", status: "Yakında" },
   { id: "f4", date: "Yakında", home: "Abyss FK", away: "Nexorian", status: "Yakında" }
 ];
 
-const INITIAL_MATCHES = {
-  "sample-1": {
-    id: "sample-1",
-    stadium: "L_OddshotStadium_Large",
-    homeTeam: "BizSiz FC",
-    awayTeam: "Hamam Zalisko",
-    homeScore: 8,
-    awayScore: 6,
-    resultText: "BIZSIZ FC KAZANDI",
-    periods: [
-      { label: "1Y", score: "3-2" },
-      { label: "2Y", score: "5-4" },
-      { label: "Süre", score: "20:00" }
-    ],
-    leaders: [
-      { type: "h-home", label: "Gol Kralı", formula: "En çok gol", value: "6", name: "Olise", team: "BizSiz FC" },
-      { type: "h-away", label: "Asist Lideri", formula: "En çok asist", value: "5", name: "shade", team: "Hamam Zalisko" },
-      { type: "h-away", label: "En İyi Defans", formula: "Ayak + kayma müdahale (başarılı)", value: "3", name: "coknogayim", team: "Hamam Zalisko" },
-      { type: "h-away", label: "En İyi Kaleci", formula: "Defans + yakalama", value: "6", name: "Lyrinx03", team: "Hamam Zalisko" }
-    ],
-    homePlayers: [
-      { name: "Olise", g: 6, a: 2, pass: 22, foot: "1/20", slide: "0/1", def: 0, catch: 0 },
-      { name: "Artvinli Leandro Trossard", g: 1, a: 4, pass: 7, foot: "0/20", slide: "0/4", def: 0, catch: 0 },
-      { name: "Keyne", g: 1, a: 0, pass: 3, foot: "1/5", slide: "0/0", def: 0, catch: 0 },
-      { name: "Wonky", g: 0, a: 2, pass: 21, foot: "0/36", slide: "0/4", def: 0, catch: 0 },
-      { name: "dirois", g: 0, a: 0, pass: 20, foot: "0/18", slide: "0/5", def: 0, catch: 0 },
-      { name: "SoulN1", g: 0, a: 0, pass: 11, foot: "0/28", slide: "0/6", def: 0, catch: 0 },
-      { name: "B1UESTR", g: 0, a: 0, pass: 12, foot: "0/0", slide: "0/0", def: 1, catch: 4 }
-    ],
-    awayPlayers: [
-      { name: "AlienAstro", g: 4, a: 0, pass: 16, foot: "2/12", slide: "0/1", def: 0, catch: 0 },
-      { name: "xaron", g: 2, a: 0, pass: 14, foot: "1/24", slide: "0/1", def: 0, catch: 0 },
-      { name: "coknogayim", g: 0, a: 0, pass: 17, foot: "3/21", slide: "0/0", def: 0, catch: 0 },
-      { name: "shade", g: 0, a: 5, pass: 22, foot: "0/13", slide: "2/19", def: 0, catch: 0 },
-      { name: "yixzy", g: 0, a: 1, pass: 7, foot: "3/18", slide: "0/5", def: 0, catch: 0 },
-      { name: "Lyrinx03", g: 0, a: 0, pass: 13, foot: "0/0", slide: "0/0", def: 4, catch: 2 }
-    ]
-  }
-};
+const INITIAL_MATCHES = {};
 
 // ---------- Depolama yardımcıları ----------
 function bootstrapStorage() {
   try {
     if (localStorage.getItem("asl_version") !== DATA_VERSION) {
-      ["asl_teams", "asl_fixtures", "asl_matches"].forEach(k => localStorage.removeItem(k));
+      ["asl_teams", "asl_fixtures", "asl_matches", "asl_manualPlayers"].forEach(k => localStorage.removeItem(k));
       localStorage.setItem("asl_version", DATA_VERSION);
     }
   } catch { /* localStorage kullanılamıyorsa sessizce geç */ }
@@ -87,6 +46,50 @@ function readStorage(key, fallback) {
   }
 }
 
+// ---------- Kart sistemi: overall hesaplama ----------
+// Herkes 50 overall'dan başlar. Attığı gol, yaptığı asist ve müdahale/kurtarışlara
+// göre kartın gücü (overall) otomatik yükselir. Üst sınır 99, alt sınır 50'dir.
+function computeOverall(p) {
+  const impact = (p.g || 0) * 3 + (p.a || 0) * 2 + (p.tackles || 0) * 1 + (p.saves || 0) * 1.2;
+  return Math.max(50, Math.min(99, 50 + Math.round(impact / 2)));
+}
+
+function tierInfo(overall) {
+  if (overall >= 90) return { key: "icon", label: "İKON" };
+  if (overall >= 80) return { key: "elite", label: "ELİT" };
+  if (overall >= 70) return { key: "gold", label: "ALTIN" };
+  if (overall >= 60) return { key: "silver", label: "GÜMÜŞ" };
+  return { key: "bronze", label: "BRONZ" };
+}
+
+// ---------- Görsel yardımcı: takım logosunu sıkıştırıp base64'e çevirir ----------
+function resizeImageFile(file, maxSize = 240) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height) {
+          if (width > maxSize) { height = Math.round(height * (maxSize / width)); width = maxSize; }
+        } else if (height > maxSize) {
+          width = Math.round(width * (maxSize / height)); height = maxSize;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => reject(new Error("Görsel okunamadı."));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Dosya okunamadı."));
+    reader.readAsDataURL(file);
+  });
+}
+
 // ---------- Ana uygulama ----------
 export default function App() {
   bootstrapStorage();
@@ -98,10 +101,12 @@ export default function App() {
   const [teams, setTeams] = useState(() => readStorage("asl_teams", INITIAL_TEAMS));
   const [fixtures, setFixtures] = useState(() => readStorage("asl_fixtures", INITIAL_FIXTURES));
   const [matches, setMatches] = useState(() => readStorage("asl_matches", INITIAL_MATCHES));
+  const [manualPlayers, setManualPlayers] = useState(() => readStorage("asl_manualPlayers", []));
 
   useEffect(() => { localStorage.setItem("asl_teams", JSON.stringify(teams)); }, [teams]);
   useEffect(() => { localStorage.setItem("asl_fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   useEffect(() => { localStorage.setItem("asl_matches", JSON.stringify(matches)); }, [matches]);
+  useEffect(() => { localStorage.setItem("asl_manualPlayers", JSON.stringify(manualPlayers)); }, [manualPlayers]);
 
   // ---- Puan durumu (otomatik) ----
   const standings = useMemo(() => {
@@ -143,12 +148,33 @@ export default function App() {
     return Object.values(map);
   }, [matches]);
 
+  // ---- Kart sistemi: istatistik bazlı kartlar + henüz maç oynamamış "yeni" kartlar ----
+  const playerCards = useMemo(() => {
+    const map = {};
+    playerStats.forEach(p => {
+      const key = `${p.name.trim().toLowerCase()}__${p.team}`;
+      map[key] = {
+        name: p.name, team: p.team, mp: p.mp, g: p.g, a: p.a,
+        tackles: p.tackles, saves: p.saves,
+        overall: computeOverall(p), isNew: false
+      };
+    });
+    manualPlayers.forEach(mp => {
+      const key = `${mp.name.trim().toLowerCase()}__${mp.team}`;
+      if (!map[key]) {
+        map[key] = { name: mp.name, team: mp.team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0, overall: 50, isNew: true };
+      }
+    });
+    return Object.values(map);
+  }, [playerStats, manualPlayers]);
+
   const nav = [
     ["home", "Ana Sayfa", Home],
     ["teams", "Takımlar", Shield],
     ["standings", "Puan Durumu", Trophy],
     ["fixtures", "Fikstür", CalendarDays],
     ["stats", "Oyuncu İstatistikleri", BarChart2],
+    ["cards", "Kartlar", CreditCard],
     ["admin", "Yönetim", Settings]
   ];
 
@@ -177,9 +203,11 @@ export default function App() {
     localStorage.removeItem("asl_teams");
     localStorage.removeItem("asl_fixtures");
     localStorage.removeItem("asl_matches");
+    localStorage.removeItem("asl_manualPlayers");
     setTeams(INITIAL_TEAMS);
     setFixtures(INITIAL_FIXTURES);
     setMatches(INITIAL_MATCHES);
+    setManualPlayers([]);
   };
 
   return (
@@ -214,8 +242,15 @@ export default function App() {
 
         {page === "stats" && <PlayerStatsPage playerStats={playerStats} />}
 
+        {page === "cards" && <CardsPage playerCards={playerCards} />}
+
         {page === "admin" && (
-          <AdminPanel teams={teams} setTeams={setTeams} fixtures={fixtures} setFixtures={setFixtures} onUpload={handleMatchUpload} onReset={resetAllData} />
+          <AdminPanel
+            teams={teams} setTeams={setTeams}
+            fixtures={fixtures} setFixtures={setFixtures}
+            manualPlayers={manualPlayers} setManualPlayers={setManualPlayers}
+            onUpload={handleMatchUpload} onReset={resetAllData}
+          />
         )}
 
         {page === "matchDetail" && activeMatchId && matches[activeMatchId] && (
@@ -330,7 +365,11 @@ function TeamsPage({ teams, standings }) {
 function TeamCard({ team, record }) {
   return (
     <article className="team">
-      <div className="logo">{team.name.split(" ").map(x => x[0]).join("").slice(0, 3)}</div>
+      <div className={`logo ${team.logo ? "hasImg" : ""}`}>
+        {team.logo
+          ? <img src={team.logo} alt={`${team.name} logosu`} />
+          : team.name.split(" ").map(x => x[0]).join("").slice(0, 3)}
+      </div>
       <div className="teamInfo">
         <h3>{team.name}</h3>
         {record
@@ -458,12 +497,72 @@ function LeaderList({ icon: Icon, title, data, field }) {
   );
 }
 
+// ---------- Kart sistemi ----------
+function CardsPage({ playerCards }) {
+  const newPlayers = playerCards.filter(p => p.isNew);
+  const active = [...playerCards.filter(p => !p.isNew)].sort((a, b) => b.overall - a.overall || b.g - a.g || b.a - a.a);
+
+  return (
+    <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Attığı gol, yaptığı asist ve müdahale/kurtarışlara göre kartın gücü otomatik yükselir.">
+      {newPlayers.length > 0 && (
+        <>
+          <div className="sectionHead" style={{ marginBottom: 16 }}>
+            <div><div className="eyebrow">HENÜZ MAÇ OYNAMADI</div><h1 style={{ fontSize: 26 }}>Yeni Oyuncular</h1></div>
+          </div>
+          <div className="cardGrid">
+            {newPlayers.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} />)}
+          </div>
+        </>
+      )}
+
+      <div className="sectionHead" style={{ marginTop: newPlayers.length ? 44 : 0, marginBottom: 16 }}>
+        <div><div className="eyebrow">KADRO</div><h1 style={{ fontSize: 26 }}>Tüm Kartlar</h1></div>
+      </div>
+
+      {active.length === 0 ? (
+        <p className="emptyNote">Henüz kart oluşturacak oyuncu verisi yok. Bir maç yükleyince veya Yönetim panelinden oyuncu ekleyince burada görünecek.</p>
+      ) : (
+        <div className="cardGrid">
+          {active.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} />)}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function PlayerCard({ player }) {
+  const tier = tierInfo(player.overall);
+  return (
+    <div className={`pcard tier-${tier.key}`}>
+      <div className="pcard-shine" />
+      {player.isNew && <span className="pcard-newTag">YENİ</span>}
+      <div className="pcard-top">
+        <span className="pcard-overall">{player.overall}</span>
+        <span className="pcard-tier">{tier.label}</span>
+      </div>
+      <div className="pcard-name">{player.name}</div>
+      <div className="pcard-team">{player.team}</div>
+      <div className="pcard-divider" />
+      <div className="pcard-stats">
+        <div><b>{player.g}</b><span>GOL</span></div>
+        <div><b>{player.a}</b><span>ASİST</span></div>
+        <div><b>{player.saves}</b><span>KURT.</span></div>
+        <div><b>{player.mp}</b><span>MAÇ</span></div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Yönetim paneli ----------
-function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset }) {
+function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, onUpload, onReset }) {
   const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamLogo, setNewTeamLogo] = useState(null);
+  const [teamLogoError, setTeamLogoError] = useState("");
   const [fixHome, setFixHome] = useState("");
   const [fixAway, setFixAway] = useState("");
   const [fixDate, setFixDate] = useState("");
+  const [newPlayerName, setNewPlayerName] = useState("");
+  const [newPlayerTeam, setNewPlayerTeam] = useState("");
   const [uploadError, setUploadError] = useState("");
 
   const handleFileUpload = e => {
@@ -483,11 +582,37 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset 
     e.target.value = "";
   };
 
+  const handleNewTeamLogo = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const dataUrl = await resizeImageFile(file, 240);
+      setNewTeamLogo(dataUrl);
+      setTeamLogoError("");
+    } catch {
+      setTeamLogoError("Logo yüklenemedi. Lütfen bir görsel dosyası seçin.");
+    }
+    e.target.value = "";
+  };
+
+  const handleExistingTeamLogo = async (id, e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const dataUrl = await resizeImageFile(file, 240);
+      setTeams(teams.map(t => t.id === id ? { ...t, logo: dataUrl } : t));
+    } catch {
+      window.alert("Logo yüklenemedi. Lütfen bir görsel dosyası seçin.");
+    }
+    e.target.value = "";
+  };
+
   const addTeam = e => {
     e.preventDefault();
     if (!newTeamName.trim()) return;
-    setTeams([...teams, { id: String(Date.now()), name: newTeamName.trim() }]);
+    setTeams([...teams, { id: String(Date.now()), name: newTeamName.trim(), logo: newTeamLogo || undefined }]);
     setNewTeamName("");
+    setNewTeamLogo(null);
   };
 
   const deleteTeam = id => setTeams(teams.filter(t => t.id !== id));
@@ -501,12 +626,21 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset 
 
   const deleteFixture = id => setFixtures(fixtures.filter(f => f.id !== id));
 
+  const addPlayer = e => {
+    e.preventDefault();
+    if (!newPlayerName.trim() || !newPlayerTeam) return;
+    setManualPlayers([...manualPlayers, { id: String(Date.now()), name: newPlayerName.trim(), team: newPlayerTeam }]);
+    setNewPlayerName(""); setNewPlayerTeam("");
+  };
+
+  const deletePlayer = id => setManualPlayers(manualPlayers.filter(p => p.id !== id));
+
   return (
-    <Section title="Yönetim Paneli" subtitle="Maç dosyalarını yükle, takımları ve fikstürü düzenle.">
+    <Section title="Yönetim Paneli" subtitle="Maç dosyalarını yükle, takımları, kartları ve fikstürü düzenle.">
       <div className="adminGrid">
         <div className="adminCard">
           <h3><Upload size={20} /> Maç İstatistiği Dosyası Yükle</h3>
-          <p>Oynanan maçın HTML istatistik raporunu yükle. Skorlar, gol/asist/kurtarış istatistikleri ve puan durumu anında güncellenir.</p>
+          <p>Oynanan maçın HTML istatistik raporunu yükle. Skorlar, gol/asist/kurtarış istatistikleri, puan durumu ve oyuncu kartları anında güncellenir.</p>
           <label className="fileInputLabel">
             <input type="file" accept=".html,.htm" onChange={handleFileUpload} />
             <span>Dosya Seç veya Sürükle (HTML)</span>
@@ -516,15 +650,55 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset 
 
         <div className="adminCard">
           <h3><Shield size={20} /> Takım Yönetimi</h3>
-          <form onSubmit={addTeam} className="formInline">
+          <form onSubmit={addTeam} className="formStack">
             <input type="text" placeholder="Takım Adı" value={newTeamName} onChange={e => setNewTeamName(e.target.value)} />
+            <label className="logoPickLabel">
+              <input type="file" accept="image/*" onChange={handleNewTeamLogo} />
+              {newTeamLogo
+                ? <img src={newTeamLogo} alt="Logo önizleme" />
+                : <span><ImageIcon size={16} /> Takım Logosu Yükle (opsiyonel)</span>}
+            </label>
+            {teamLogoError && <p className="errorNote">{teamLogoError}</p>}
             <button type="submit" className="primary"><Plus size={16} /> Ekle</button>
           </form>
           <div className="adminList">
             {teams.map(t => (
               <div key={t.id} className="adminListItem">
-                <span><b>{t.name}</b></span>
-                <button onClick={() => deleteTeam(t.id)} className="danger"><Trash2 size={14} /></button>
+                <span className="adminTeamRow">
+                  <span className="adminTeamLogo">
+                    {t.logo ? <img src={t.logo} alt="" /> : t.name.split(" ").map(x => x[0]).join("").slice(0, 3)}
+                  </span>
+                  <b>{t.name}</b>
+                </span>
+                <span className="adminTeamActions">
+                  <label className="tinyUpload" title="Logo değiştir">
+                    <input type="file" accept="image/*" onChange={e => handleExistingTeamLogo(t.id, e)} />
+                    <ImageIcon size={13} />
+                  </label>
+                  <button onClick={() => deleteTeam(t.id)} className="danger"><Trash2 size={14} /></button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="adminCard">
+          <h3><CreditCard size={20} /> Yeni Oyuncu Kartı Ekle</h3>
+          <p>50 overall'dan başlayan bir kart oluşturur. Oyuncu bir maç istatistiğinde görünmeye başladığında kartı otomatik olarak gerçek performansına göre güncellenir ve "Yeni Oyuncular" listesinden çıkar.</p>
+          <form onSubmit={addPlayer} className="formInline">
+            <input type="text" placeholder="Oyuncu Adı" value={newPlayerName} onChange={e => setNewPlayerName(e.target.value)} />
+            <select value={newPlayerTeam} onChange={e => setNewPlayerTeam(e.target.value)}>
+              <option value="">Takım Seç</option>
+              {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+            </select>
+            <button type="submit" className="primary"><Plus size={16} /> Ekle</button>
+          </form>
+          <div className="adminList">
+            {manualPlayers.length === 0 && <p className="emptyNote small">Henüz manuel eklenmiş oyuncu yok.</p>}
+            {manualPlayers.map(p => (
+              <div key={p.id} className="adminListItem">
+                <span><b>{p.name}</b> <small>({p.team})</small></span>
+                <button onClick={() => deletePlayer(p.id)} className="danger"><Trash2 size={14} /></button>
               </div>
             ))}
           </div>
@@ -556,7 +730,7 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset 
 
         <div className="adminCard dangerCard">
           <h3><RotateCcw size={20} /> Verileri Sıfırla</h3>
-          <p>Tüm takımlar, fikstür ve maç istatistiklerini siler, örnek demo verilerle değiştirir. Bu işlem geri alınamaz.</p>
+          <p>Tüm takımlar, fikstür, maç istatistikleri ve oyuncu kartlarını siler, örnek demo verilerle değiştirir. Bu işlem geri alınamaz.</p>
           <button className="danger outline" onClick={onReset}><RotateCcw size={14} /> Tüm Verileri Sıfırla</button>
         </div>
       </div>
