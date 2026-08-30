@@ -4,7 +4,7 @@ import {
   ChevronRight, X, Menu, BarChart2, Crosshair, Share2, Hand,
   ShieldCheck, RotateCcw, Radio, CreditCard, Image as ImageIcon, Lock, LogOut
 } from "lucide-react";
-import { parseMatchHTML, successCount } from "./lib/parseMatch.js";
+import { parseMatchHTML, parseMatchJSON, successCount } from "./lib/parseMatch.js";
 
 // Yönetim paneli şifresi artık kodda YOK. Şifre, Vercel projesinin
 // ortam değişkenlerinde (ADMIN_PASSWORD) tutulur ve doğrulama
@@ -43,6 +43,29 @@ function tierInfo(overall) {
   if (overall >= 70) return { key: "gold", label: "ALTIN" };
   if (overall >= 60) return { key: "silver", label: "GÜMÜŞ" };
   return { key: "bronze", label: "BRONZ" };
+}
+
+// ---------- Dosya okuma yardımcısı: BOM'a bakarak UTF-8/UTF-16 otomatik algılar ----------
+// Oyunun dışa aktardığı JSON dosyaları bazen UTF-16 kodlamasıyla geliyor;
+// düz readAsText bunu bozuk karakterlere çevirebiliyor, bu yüzden dosyayı
+// ham byte olarak okuyup doğru kodlamayla çözüyoruz.
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      let encoding = "utf-8";
+      if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) encoding = "utf-16le";
+      else if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) encoding = "utf-16be";
+      try {
+        resolve(new TextDecoder(encoding).decode(reader.result));
+      } catch {
+        resolve(new TextDecoder("utf-8").decode(reader.result));
+      }
+    };
+    reader.onerror = () => reject(new Error("Dosya okunamadı."));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 // ---------- Görsel yardımcı: takım logosunu sıkıştırıp base64'e çevirir ----------
@@ -703,22 +726,64 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerTeam, setNewPlayerTeam] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [pendingJson, setPendingJson] = useState(null);
+  const [jsonHome, setJsonHome] = useState("");
+  const [jsonAway, setJsonAway] = useState("");
 
-  const handleFileUpload = e => {
+  const handleFileUpload = async e => {
     const file = e.target.files[0];
     if (!file) return;
     setUploadError("");
-    const reader = new FileReader();
-    reader.onload = evt => {
+    const isJson = file.name.toLowerCase().endsWith(".json");
+    let text;
+    try {
+      text = await readFileText(file);
+    } catch {
+      setUploadError("Dosya okunamadı.");
+      e.target.value = "";
+      return;
+    }
+    if (isJson) {
       try {
-        onUpload(parseMatchHTML(evt.target.result));
-      } catch (err) {
+        const data = JSON.parse(text);
+        if (!Array.isArray(data.players)) throw new Error("Geçersiz JSON yapısı.");
+        setPendingJson(data);
+        setJsonHome("");
+        setJsonAway("");
+      } catch {
+        setUploadError("Dosya okunurken hata oluştu. Lütfen geçerli bir maç istatistik JSON dosyası yükleyin.");
+      }
+    } else {
+      try {
+        onUpload(parseMatchHTML(text));
+      } catch {
         setUploadError("Dosya okunurken hata oluştu. Lütfen geçerli bir maç istatistik HTML dosyası yükleyin.");
       }
-    };
-    reader.onerror = () => setUploadError("Dosya okunamadı.");
-    reader.readAsText(file);
+    }
     e.target.value = "";
+  };
+
+  const confirmJsonImport = () => {
+    if (!jsonHome || !jsonAway || jsonHome === jsonAway) {
+      setUploadError("Ev sahibi ve deplasman için farklı iki takım seç.");
+      return;
+    }
+    try {
+      onUpload(parseMatchJSON(pendingJson, jsonHome, jsonAway));
+      setPendingJson(null);
+      setJsonHome("");
+      setJsonAway("");
+      setUploadError("");
+    } catch (err) {
+      setUploadError(err.message || "İçe aktarılamadı.");
+    }
+  };
+
+  const cancelJsonImport = () => {
+    setPendingJson(null);
+    setJsonHome("");
+    setJsonAway("");
+    setUploadError("");
   };
 
   const handleNewTeamLogo = async e => {
@@ -783,11 +848,32 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
       <div className="adminGrid">
         <div className="adminCard">
           <h3><Upload size={20} /> Maç İstatistiği Dosyası Yükle</h3>
-          <p>Oynanan maçın HTML istatistik raporunu yükle. Skorlar, gol/asist/kurtarış istatistikleri, puan durumu ve oyuncu kartları anında güncellenir.</p>
+          <p>Oynanan maçın HTML ya da JSON istatistik raporunu yükle. Skorlar, gol/asist/kurtarış istatistikleri, puan durumu ve oyuncu kartları anında güncellenir.</p>
           <label className="fileInputLabel">
-            <input type="file" accept=".html,.htm" onChange={handleFileUpload} />
-            <span>Dosya Seç veya Sürükle (HTML)</span>
+            <input type="file" accept=".html,.htm,.json" onChange={handleFileUpload} />
+            <span>Dosya Seç veya Sürükle (HTML / JSON)</span>
           </label>
+          {pendingJson && (
+            <div className="formStack" style={{ marginTop: 12 }}>
+              <p className="emptyNote small">
+                JSON okundu — {pendingJson.players.length} oyuncu, skor{" "}
+                {pendingJson.score?.home ?? 0} - {pendingJson.score?.away ?? 0}.
+                Bu veride "home" / "away" olarak geçen taraflar gerçekte hangi takımlar?
+              </p>
+              <select value={jsonHome} onChange={e => setJsonHome(e.target.value)}>
+                <option value="">Ev Sahibi Takımı Seç</option>
+                {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select>
+              <select value={jsonAway} onChange={e => setJsonAway(e.target.value)}>
+                <option value="">Deplasman Takımını Seç</option>
+                {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select>
+              <div className="adminTopBar">
+                <button type="button" className="primary" onClick={confirmJsonImport}>İçe Aktar</button>
+                <button type="button" className="lockBtn" onClick={cancelJsonImport}>Vazgeç</button>
+              </div>
+            </div>
+          )}
           {uploadError && <p className="errorNote">{uploadError}</p>}
         </div>
 

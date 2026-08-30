@@ -15,11 +15,18 @@ bu normal, aşağıdaki adımları tamamlayınca kalıcı hale gelir.
 
 ## 2) Vercel'de ortak veritabanını (KV) oluştur
 
+Not: Vercel'in eski "native" KV ürünü kaldırıldı; artık Marketplace üzerinden
+Upstash (Redis uyumlu) sağlayıcısıyla kuruluyor. Kullandığımız `@vercel/kv`
+paketi bununla sorunsuz çalışıyor.
+
 1. Vercel Dashboard → projen → üstteki **Storage** sekmesi.
-2. **Create Database** → **KV** (Upstash tabanlı, Redis uyumlu) seç.
-3. Bir isim ver (örn. `asl-hub-db`) → oluştur.
-4. Açılan ekranda **Connect to Project** deyip bu projeyi seç, tüm ortamları
-   (Production, Preview, Development) işaretli bırak → bağla.
+2. **Create Database** / **Browse Marketplace** butonuna bas.
+3. Sağlayıcı listesinden **Upstash** (Redis / KV) seç.
+4. Bir isim ver (örn. `asl-hub-db`), bölge seç (sana yakın bir Avrupa bölgesi
+   iyi olur), ücretsiz plan → **Create/Continue**.
+5. Sihirbazın sonunda **Connect to Project** adımında bu projeyi (asl-hub)
+   seç, tüm ortamları (Production, Preview, Development) işaretli bırak →
+   bağla.
    - Bu adım otomatik olarak `KV_REST_API_URL`, `KV_REST_API_TOKEN` gibi ortam
      değişkenlerini projene ekler. Sen hiçbir şey kopyalamana gerek yok.
 
