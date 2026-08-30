@@ -8,17 +8,17 @@ import { parseMatchHTML, successCount } from "./lib/parseMatch.js";
 
 // Kod her güncellendiğinde bu sürümü artır — tarayıcıdaki eski localStorage
 // verisi otomatik temizlenir ve yeni demo veriler yüklenir.
-const DATA_VERSION = "3";
+const DATA_VERSION = "4";
 
 const INITIAL_TEAMS = [
-  { id: "1", name: "BizSiz FC", group: "A" },
-  { id: "2", name: "Hamam Zalisko", group: "A" },
-  { id: "3", name: "Metospor FK", group: "A" },
-  { id: "4", name: "Winchester City FC", group: "A" },
-  { id: "5", name: "Relentless", group: "B" },
-  { id: "6", name: "Noroshi", group: "B" },
-  { id: "7", name: "Abyss FK", group: "B" },
-  { id: "8", name: "Nexorian", group: "B" }
+  { id: "1", name: "BizSiz FC" },
+  { id: "2", name: "Hamam Zalisko" },
+  { id: "3", name: "Metospor FK" },
+  { id: "4", name: "Winchester City FC" },
+  { id: "5", name: "Relentless" },
+  { id: "6", name: "Noroshi" },
+  { id: "7", name: "Abyss FK" },
+  { id: "8", name: "Nexorian" }
 ];
 
 const INITIAL_FIXTURES = [
@@ -107,11 +107,11 @@ export default function App() {
   const standings = useMemo(() => {
     const stats = {};
     teams.forEach(t => {
-      stats[t.name] = { name: t.name, group: t.group, played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
+      stats[t.name] = { name: t.name, played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
     });
     Object.values(matches).forEach(m => {
-      const h = stats[m.homeTeam] || (stats[m.homeTeam] = { name: m.homeTeam, group: "-", played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0, pts: 0 });
-      const a = stats[m.awayTeam] || (stats[m.awayTeam] = { name: m.awayTeam, group: "-", played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0, pts: 0 });
+      const h = stats[m.homeTeam] || (stats[m.homeTeam] = { name: m.homeTeam, played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0, pts: 0 });
+      const a = stats[m.awayTeam] || (stats[m.awayTeam] = { name: m.awayTeam, played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0, pts: 0 });
       h.played += 1; a.played += 1;
       h.gf += m.homeScore; h.ga += m.awayScore;
       a.gf += m.awayScore; a.ga += m.homeScore;
@@ -187,7 +187,7 @@ export default function App() {
       <header>
         <div className="nav wrap">
           <button className="brand" onClick={() => go("home")}>
-            <span className="brandMark">ASL</span>
+            <img className="brandMark" src="/logo.png" alt="ASL amblemi" />
             <span><b>ASL Hub</b><small>Anadolu Strikers Ligi</small></span>
           </button>
           <button className="mobile" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
@@ -206,7 +206,7 @@ export default function App() {
 
         {page === "teams" && <TeamsPage teams={teams} standings={standings} />}
 
-        {page === "standings" && <StandingsPage teams={teams} standings={standings} />}
+        {page === "standings" && <StandingsPage standings={standings} />}
 
         {page === "fixtures" && (
           <FixturesPage fixtures={fixtures} onOpenMatch={id => { setActiveMatchId(id); go("matchDetail"); }} />
@@ -267,7 +267,7 @@ function HomePage({ go, teams, fixtures, matches, standings, playerStats }) {
           </div>
         </div>
         <div className="heroCard">
-          <div className="orb">ASL</div>
+          <img className="heroCrest" src="/logo.png" alt="Anadolu Strikers Ligi amblemi" />
           <div><b>ANADOLU STRIKERS LİGİ</b><small>SEZON 2026</small></div>
         </div>
       </section>
@@ -318,17 +318,11 @@ function HomePage({ go, teams, fixtures, matches, standings, playerStats }) {
 // ---------- Takımlar ----------
 function TeamsPage({ teams, standings }) {
   const byName = useMemo(() => Object.fromEntries(standings.map(s => [s.name, s])), [standings]);
-  const groups = [...new Set(teams.map(t => t.group))].sort();
   return (
     <Section title="Takımlar" subtitle="Anadolu Strikers Ligi'nde mücadele eden ekipler.">
-      {groups.map(g => (
-        <div key={g} className="groupBlock">
-          <div className="groupLabel">Grup {g}</div>
-          <div className="teamGrid">
-            {teams.filter(t => t.group === g).map(t => <TeamCard key={t.id} team={t} record={byName[t.name]} />)}
-          </div>
-        </div>
-      ))}
+      <div className="teamGrid">
+        {teams.map(t => <TeamCard key={t.id} team={t} record={byName[t.name]} />)}
+      </div>
     </Section>
   );
 }
@@ -341,7 +335,7 @@ function TeamCard({ team, record }) {
         <h3>{team.name}</h3>
         {record
           ? <span>{record.played} maç · {record.wins}G {record.draws}B {record.losses}M</span>
-          : <span>Grup {team.group}</span>}
+          : <span>Henüz maç oynanmadı</span>}
       </div>
       <ChevronRight />
     </article>
@@ -349,24 +343,15 @@ function TeamCard({ team, record }) {
 }
 
 // ---------- Puan durumu ----------
-function StandingsPage({ teams, standings }) {
-  const groups = ["Tümü", ...new Set(teams.map(t => t.group))].sort((a, b) => (a === "Tümü" ? -1 : a.localeCompare(b)));
-  const [filter, setFilter] = useState("Tümü");
-  const rows = filter === "Tümü" ? standings : standings.filter(s => s.group === filter);
-
+function StandingsPage({ standings }) {
   return (
     <Section title="Puan Durumu" subtitle="Oynanan maçlara göre otomatik güncellenen lig sıralaması.">
-      <div className="tabRow">
-        {groups.map(g => (
-          <button key={g} className={filter === g ? "tab active" : "tab"} onClick={() => setFilter(g)}>{g === "Tümü" ? g : `Grup ${g}`}</button>
-        ))}
-      </div>
       <div className="tableCard">
         <div className="tableScroll">
           <table>
             <thead><tr><th>#</th><th>Takım</th><th>O</th><th>G</th><th>B</th><th>M</th><th>AG</th><th>YG</th><th>AV</th><th>PTS</th></tr></thead>
             <tbody>
-              {rows.map((t, i) => (
+              {standings.map((t, i) => (
                 <tr key={t.name}>
                   <td>{i + 1}</td><td><b>{t.name}</b></td><td>{t.played}</td><td>{t.wins}</td><td>{t.draws}</td><td>{t.losses}</td>
                   <td>{t.gf}</td><td>{t.ga}</td><td>{t.gd}</td><td><strong>{t.pts}</strong></td>
@@ -476,7 +461,6 @@ function LeaderList({ icon: Icon, title, data, field }) {
 // ---------- Yönetim paneli ----------
 function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset }) {
   const [newTeamName, setNewTeamName] = useState("");
-  const [newTeamGroup, setNewTeamGroup] = useState("A");
   const [fixHome, setFixHome] = useState("");
   const [fixAway, setFixAway] = useState("");
   const [fixDate, setFixDate] = useState("");
@@ -502,7 +486,7 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset 
   const addTeam = e => {
     e.preventDefault();
     if (!newTeamName.trim()) return;
-    setTeams([...teams, { id: String(Date.now()), name: newTeamName.trim(), group: newTeamGroup }]);
+    setTeams([...teams, { id: String(Date.now()), name: newTeamName.trim() }]);
     setNewTeamName("");
   };
 
@@ -534,16 +518,12 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, onUpload, onReset 
           <h3><Shield size={20} /> Takım Yönetimi</h3>
           <form onSubmit={addTeam} className="formInline">
             <input type="text" placeholder="Takım Adı" value={newTeamName} onChange={e => setNewTeamName(e.target.value)} />
-            <select value={newTeamGroup} onChange={e => setNewTeamGroup(e.target.value)}>
-              <option value="A">Grup A</option>
-              <option value="B">Grup B</option>
-            </select>
             <button type="submit" className="primary"><Plus size={16} /> Ekle</button>
           </form>
           <div className="adminList">
             {teams.map(t => (
               <div key={t.id} className="adminListItem">
-                <span><b>{t.name}</b> <small>(Grup {t.group})</small></span>
+                <span><b>{t.name}</b></span>
                 <button onClick={() => deleteTeam(t.id)} className="danger"><Trash2 size={14} /></button>
               </div>
             ))}
