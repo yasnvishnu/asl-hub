@@ -30,21 +30,35 @@ const INITIAL_FIXTURES = [
 const INITIAL_MATCHES = {};
 
 // ---------- Kart sistemi: overall hesaplama ----------
-// Herkes 50 overall'dan başlar. Overall, TOPLAM istatistik yerine oyuncunun
-// MAÇ BAŞINA ORTALAMA performansına göre hesaplanır. Böylece sadece çok
-// maça çıkan (ama vasat oynayan) bir oyuncunun overall'ı sürekli tırmanmaz;
-// az maçta istikrarlı iyi oynayan biri de hemen doğru overall'ı görür.
-// Çok az sayıda maç oynamış olmak da küçük (en fazla +5) bir "tecrübe"
-// bonusuyla ödüllendirilir. Üst sınır 99, alt sınır 50'dir.
+// Herkes 50 overall'dan başlar. Her istatistik türünün kendi "katsayısı"
+// vardır ve oyuncu maç oynadıkça TOPLAM (kariyer boyu biriken) istatistiği
+// bu katsayılarla çarpılıp overall'a eklenir — yani bir golün, bir asistin
+// ve bir kurtarışın overall'a katkısı sabittir, tek bir maçta atılan tek
+// gol asla kartı 99'a fırlatmaz:
+//   1 GOL      = 1.0 puan
+//   1 ASİST    = 0.6 puan
+//   1 KURTARIŞ = 0.3 puan
+//   1 MÜDAHALE = 0.2 puan
+// Bu "ham etki puanı" doğrudan overall'a eklenmez; kareköküyle yumuşatılıp
+// (x3.2 ile ölçeklenip) eklenir. Böylece kart, insan gibi kademeli kademeli
+// yükselir: az istatistikte hızlı görünür bir artış olur, oyuncu efsane
+// istatistiklere ulaştıkça artış giderek yavaşlar (örn. toplamda 10 gollük
+// bir etki ~ +10 overall gibi görünür, ama 100 gollük etki +32 civarındadır,
+// +100 değil). Ayrıca uzun süredir aktif oynayan oyuncular için küçük
+// (en fazla +4) bir "tecrübe" bonusu vardır. Üst sınır 99, alt sınır 50'dir.
+const OVERALL_COEF = { goal: 1.0, assist: 0.6, save: 0.3, tackle: 0.2 };
+const OVERALL_SCALE = 3.2;
+
 function computeOverall(p) {
   const mp = p.mp || 0;
   if (mp === 0) return 50;
-  const perG = (p.g || 0) / mp;
-  const perA = (p.a || 0) / mp;
-  const perTackle = (p.tackles || 0) / mp;
-  const perSave = (p.saves || 0) / mp;
-  const impact = perG * 6 + perA * 4 + perTackle * 1.4 + perSave * 1.1;
-  const experienceBonus = Math.min(5, Math.floor(mp / 5));
+  const rawImpact =
+    (p.g || 0) * OVERALL_COEF.goal +
+    (p.a || 0) * OVERALL_COEF.assist +
+    (p.saves || 0) * OVERALL_COEF.save +
+    (p.tackles || 0) * OVERALL_COEF.tackle;
+  const impact = Math.sqrt(rawImpact) * OVERALL_SCALE;
+  const experienceBonus = Math.min(4, Math.floor(mp / 6));
   return Math.max(50, Math.min(99, Math.round(50 + impact + experienceBonus)));
 }
 
@@ -402,7 +416,7 @@ export default function App() {
 
         {!loading && page === "stats" && <PlayerStatsPage playerStats={playerStats} />}
 
-        {!loading && page === "cards" && <CardsPage playerCards={playerCards} />}
+        {!loading && page === "cards" && <CardsPage playerCards={playerCards} teams={teams} />}
 
         {!loading && page === "admin" && (
           <>
@@ -680,19 +694,24 @@ function LeaderList({ icon: Icon, title, data, field }) {
 }
 
 // ---------- Kart sistemi ----------
-function CardsPage({ playerCards }) {
+function CardsPage({ playerCards, teams = [] }) {
   const newPlayers = playerCards.filter(p => p.isNew);
   const active = [...playerCards.filter(p => !p.isNew)].sort((a, b) => b.overall - a.overall || b.g - a.g || b.a - a.a);
+  const crestByTeam = useMemo(() => {
+    const map = {};
+    teams.forEach(t => { if (t.logo) map[t.name] = t.logo; });
+    return map;
+  }, [teams]);
 
   return (
-    <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Kartın gücü, toplam istatistik değil maç başına ortalama performans (gol, asist, müdahale, kurtarış) baz alınarak otomatik hesaplanır.">
+    <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Gol, asist, kurtarış ve müdahalenin kendi katsayısı vardır; kart, biriken istatistiklere göre kademeli olarak yükselir — tek maçta atılan tek bir gol kartı asla 99'a fırlatmaz.">
       {newPlayers.length > 0 && (
         <>
           <div className="sectionHead" style={{ marginBottom: 16 }}>
             <div><div className="eyebrow">HENÜZ MAÇ OYNAMADI</div><h1 style={{ fontSize: 26 }}>Yeni Oyuncular</h1></div>
           </div>
           <div className="cardGrid">
-            {newPlayers.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} />)}
+            {newPlayers.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} crest={crestByTeam[p.team]} />)}
           </div>
         </>
       )}
@@ -705,11 +724,25 @@ function CardsPage({ playerCards }) {
         <p className="emptyNote">Henüz kart oluşturacak oyuncu verisi yok. Bir maç yükleyince veya Yönetim panelinden oyuncu ekleyince burada görünecek.</p>
       ) : (
         <div className="cardGrid">
-          {active.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} />)}
+          {active.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} crest={crestByTeam[p.team]} />)}
         </div>
       )}
     </Section>
   );
+}
+
+// Gerçek pozisyon verisi tutulmadığı için, FUT tarzı kartlardaki kısa
+// pozisyon rozetini (ST, GK, CM...) maç başına performansa bakarak kabaca
+// tahmin ediyoruz — sadece görsel bir dokunuş, istatistiği etkilemez.
+function roleTag(p) {
+  const mp = p.mp || 0;
+  if (mp === 0) return "OYN";
+  const perG = (p.g || 0) / mp;
+  const perA = (p.a || 0) / mp;
+  const perS = (p.saves || 0) / mp;
+  if (perS > perG && perS > perA && perS > 0.2) return "KLC";
+  if (perG >= perA) return "FRV";
+  return "OSA";
 }
 
 function initialsOf(name) {
@@ -722,17 +755,22 @@ function initialsOf(name) {
     .toUpperCase();
 }
 
-function PlayerCard({ player }) {
+function PlayerCard({ player, crest }) {
   const tier = tierInfo(player.overall);
+  const role = roleTag(player);
   return (
     <div className={`pcard tier-${tier.key}`}>
       <div className="pcard-shine" />
+      <div className="pcard-pattern" />
       {player.isNew && <span className="pcard-newTag">YENİ</span>}
       <div className="pcard-inner">
         <div className="pcard-head">
           <div className="pcard-rating">
             <span className="pcard-overall">{player.overall}</span>
-            <span className="pcard-tier">{tier.label}</span>
+            <span className="pcard-role">{role}</span>
+            <span className="pcard-crest">
+              {crest ? <img src={crest} alt="" /> : <span className="pcard-crestDot" />}
+            </span>
           </div>
           <div className="pcard-photo"><span>{initialsOf(player.name)}</span></div>
         </div>
@@ -749,8 +787,8 @@ function PlayerCard({ player }) {
 
         <div className="pcard-stats">
           <div><b>{player.g}</b><span>GOL</span></div>
-          <div><b>{player.a}</b><span>ASİST</span></div>
-          <div><b>{player.saves}</b><span>KURT.</span></div>
+          <div><b>{player.a}</b><span>AST</span></div>
+          <div><b>{player.saves}</b><span>KRT</span></div>
           <div><b>{player.mp}</b><span>MAÇ</span></div>
         </div>
       </div>
@@ -1014,7 +1052,7 @@ function AdminPanel({
 
         <div className="adminCard">
           <h3><CreditCard size={20} /> Yeni Oyuncu Kartı Ekle</h3>
-          <p>50 overall'dan başlayan bir kart oluşturur. Oyuncu bir maç istatistiğinde görünmeye başladığında kartı otomatik olarak gerçek performansına göre güncellenir ve "Yeni Oyuncular" listesinden çıkar.</p>
+          <p>50 overall'dan başlayan bir kart oluşturur. Oyuncu bir maç istatistiğinde görünmeye başladığında kartı otomatik olarak gol/asist/kurtarış/müdahale katsayılarına göre kademeli şekilde güncellenir ve "Yeni Oyuncular" listesinden çıkar.</p>
           <form onSubmit={addPlayer} className="formInline">
             <input type="text" placeholder="Oyuncu Adı" value={newPlayerName} onChange={e => setNewPlayerName(e.target.value)} />
             <select value={newPlayerTeam} onChange={e => setNewPlayerTeam(e.target.value)}>
