@@ -2,13 +2,21 @@ import React, { useMemo, useState, useEffect } from "react";
 import {
   Home, Shield, Trophy, CalendarDays, Upload, Settings, Plus, Trash2,
   ChevronRight, X, Menu, BarChart2, Crosshair, Share2, Hand,
-  ShieldCheck, RotateCcw, Radio, CreditCard, Image as ImageIcon
+  ShieldCheck, RotateCcw, Radio, CreditCard, Image as ImageIcon, Lock, LogOut
 } from "lucide-react";
 import { parseMatchHTML, successCount } from "./lib/parseMatch.js";
 
 // Kod her güncellendiğinde bu sürümü artır — tarayıcıdaki eski localStorage
 // verisi otomatik temizlenir ve yeni demo veriler yüklenir.
 const DATA_VERSION = "5";
+
+// Yönetim paneli şifresi. Değiştirmek istersen sadece tırnak içindeki
+// kelimeyi değiştirip dosyayı kaydetmen yeterli.
+// NOT: Bu koruma sadece rastgele ziyaretçileri caydırmak içindir — kod
+// tarayıcıya gönderildiği için teknik olarak görüntülenebilir. Gerçek
+// bir "kimse göremesin" güvenliği için sunucu taraflı bir giriş sistemi
+// gerekir.
+const ADMIN_PASSWORD = "asl2026";
 
 const INITIAL_TEAMS = [
   { id: "3", name: "Metospor FK" },
@@ -102,6 +110,18 @@ export default function App() {
   const [fixtures, setFixtures] = useState(() => readStorage("asl_fixtures", INITIAL_FIXTURES));
   const [matches, setMatches] = useState(() => readStorage("asl_matches", INITIAL_MATCHES));
   const [manualPlayers, setManualPlayers] = useState(() => readStorage("asl_manualPlayers", []));
+  const [adminUnlocked, setAdminUnlocked] = useState(() => {
+    try { return sessionStorage.getItem("asl_admin_unlocked") === "1"; } catch { return false; }
+  });
+
+  const unlockAdmin = () => {
+    setAdminUnlocked(true);
+    try { sessionStorage.setItem("asl_admin_unlocked", "1"); } catch { /* geç */ }
+  };
+  const lockAdmin = () => {
+    setAdminUnlocked(false);
+    try { sessionStorage.removeItem("asl_admin_unlocked"); } catch { /* geç */ }
+  };
 
   useEffect(() => { localStorage.setItem("asl_teams", JSON.stringify(teams)); }, [teams]);
   useEffect(() => { localStorage.setItem("asl_fixtures", JSON.stringify(fixtures)); }, [fixtures]);
@@ -245,12 +265,17 @@ export default function App() {
         {page === "cards" && <CardsPage playerCards={playerCards} />}
 
         {page === "admin" && (
-          <AdminPanel
-            teams={teams} setTeams={setTeams}
-            fixtures={fixtures} setFixtures={setFixtures}
-            manualPlayers={manualPlayers} setManualPlayers={setManualPlayers}
-            onUpload={handleMatchUpload} onReset={resetAllData}
-          />
+          adminUnlocked ? (
+            <AdminPanel
+              teams={teams} setTeams={setTeams}
+              fixtures={fixtures} setFixtures={setFixtures}
+              manualPlayers={manualPlayers} setManualPlayers={setManualPlayers}
+              onUpload={handleMatchUpload} onReset={resetAllData}
+              onLock={lockAdmin}
+            />
+          ) : (
+            <AdminGate onUnlock={unlockAdmin} />
+          )
         )}
 
         {page === "matchDetail" && activeMatchId && matches[activeMatchId] && (
@@ -553,8 +578,45 @@ function PlayerCard({ player }) {
   );
 }
 
+// ---------- Yönetim paneli: şifre kapısı ----------
+function AdminGate({ onUnlock }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = e => {
+    e.preventDefault();
+    if (pw === ADMIN_PASSWORD) {
+      onUnlock();
+    } else {
+      setError("Şifre yanlış. Tekrar dene.");
+      setPw("");
+    }
+  };
+
+  return (
+    <Section title="Yönetim Paneli" subtitle="Bu alan şifreyle korunuyor.">
+      <div className="adminGate">
+        <div className="adminGateIcon"><Lock size={26} /></div>
+        <h3>Devam etmek için şifreyi gir</h3>
+        <p>Bu sayfa sadece yetkili kişilerin takım, fikstür, maç ve oyuncu kartlarını yönetmesi için korunuyor.</p>
+        <form onSubmit={submit} className="adminGateForm">
+          <input
+            type="password"
+            placeholder="Şifre"
+            value={pw}
+            onChange={e => { setPw(e.target.value); setError(""); }}
+            autoFocus
+          />
+          <button type="submit" className="primary">Giriş Yap</button>
+        </form>
+        {error && <p className="errorNote">{error}</p>}
+      </div>
+    </Section>
+  );
+}
+
 // ---------- Yönetim paneli ----------
-function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, onUpload, onReset }) {
+function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, onUpload, onReset, onLock }) {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamLogo, setNewTeamLogo] = useState(null);
   const [teamLogoError, setTeamLogoError] = useState("");
@@ -637,6 +699,10 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
 
   return (
     <Section title="Yönetim Paneli" subtitle="Maç dosyalarını yükle, takımları, kartları ve fikstürü düzenle.">
+      <div className="adminTopBar">
+        <span className="adminTopBarNote"><Lock size={13} /> Bu alan şifreyle korunuyor</span>
+        <button className="lockBtn" onClick={onLock}><LogOut size={14} /> Kilitle</button>
+      </div>
       <div className="adminGrid">
         <div className="adminCard">
           <h3><Upload size={20} /> Maç İstatistiği Dosyası Yükle</h3>
