@@ -28,39 +28,25 @@ export function parseMatchHTML(htmlContent) {
     team: el.querySelector(".lc-team")?.textContent?.trim() || ""
   }));
 
-  // Bazı oyun içi raporlarda takım tablosunun altında/üstünde takımın
-  // kendi adıyla veya "Toplam" gibi bir özet satırı bulunur. Bu satır bir
-  // oyuncu değildir ve kart/istatistik sistemine "hayalet oyuncu" olarak
-  // sızmaması için burada filtrelenir.
-  const SUMMARY_ROW_WORDS = ["toplam", "total", "takım", "team", "genel"];
-  function isSummaryRow(name, teamName) {
-    const n = name.trim().toLowerCase();
-    if (!n) return true;
-    if (teamName && n === teamName.trim().toLowerCase()) return true;
-    return SUMMARY_ROW_WORDS.some(w => n === w || n.startsWith(w + " ") || n.endsWith(" " + w));
-  }
-
-  const parseTable = (selector, teamName) => {
+  const parseTable = selector => {
     const rows = doc.querySelectorAll(`${selector} tbody tr`);
-    return Array.from(rows)
-      .map(r => {
-        const tds = r.querySelectorAll("td");
-        return {
-          name: tds[0]?.textContent?.trim() || "",
-          g: parseInt(tds[1]?.textContent || "0", 10) || 0,
-          a: parseInt(tds[2]?.textContent || "0", 10) || 0,
-          pass: parseInt(tds[3]?.textContent || "0", 10) || 0,
-          foot: tds[4]?.textContent?.trim() || "0/0",
-          slide: tds[5]?.textContent?.trim() || "0/0",
-          def: parseInt(tds[6]?.textContent || "0", 10) || 0,
-          catch: parseInt(tds[7]?.textContent || "0", 10) || 0
-        };
-      })
-      .filter(p => !isSummaryRow(p.name, teamName));
+    return Array.from(rows).map(r => {
+      const tds = r.querySelectorAll("td");
+      return {
+        name: tds[0]?.textContent?.trim() || "",
+        g: parseInt(tds[1]?.textContent || "0", 10) || 0,
+        a: parseInt(tds[2]?.textContent || "0", 10) || 0,
+        pass: parseInt(tds[3]?.textContent || "0", 10) || 0,
+        foot: tds[4]?.textContent?.trim() || "0/0",
+        slide: tds[5]?.textContent?.trim() || "0/0",
+        def: parseInt(tds[6]?.textContent || "0", 10) || 0,
+        catch: parseInt(tds[7]?.textContent || "0", 10) || 0
+      };
+    });
   };
 
-  const homePlayers = parseTable(".team-panel.home", homeTeam);
-  const awayPlayers = parseTable(".team-panel.away", awayTeam);
+  const homePlayers = parseTable(".team-panel.home");
+  const awayPlayers = parseTable(".team-panel.away");
 
   if (!homeTeam || !awayTeam || (homeScore === 0 && awayScore === 0 && homePlayers.length === 0)) {
     throw new Error("Dosyada tanınabilir bir maç istatistiği bulunamadı.");

@@ -54,35 +54,12 @@ function readStorage(key, fallback) {
   }
 }
 
-// Takım isimlerinin, yüklenen maç raporlarındaki bir özet/toplam satırı
-// yüzünden yanlışlıkla "oyuncu" gibi işlenmesini engellemek için kullanılır.
-const SUMMARY_ROW_WORDS = ["toplam", "total", "takım", "team", "genel"];
-function isLikelyTeamGhost(name, team) {
-  const n = (name || "").trim().toLowerCase();
-  const t = (team || "").trim().toLowerCase();
-  if (!n) return true;
-  if (t && n === t) return true;
-  return SUMMARY_ROW_WORDS.some(w => n === w || n.startsWith(w + " ") || n.endsWith(" " + w));
-}
-
 // ---------- Kart sistemi: overall hesaplama ----------
-// Herkes 50 overall'dan başlar. Kart gücü, oyuncunun TOPLAM istatistiklerine
-// değil, MAÇ BAŞINA ORTALAMA performansına göre hesaplanır. Bu sayede sadece
-// çok maç oynayan bir oyuncu otomatik olarak yükselmez; seviyeyi artırmak için
-// gerçekten güçlü ve istikrarlı bir ortalama gerekir. Üst sınır 99, alt sınır 50'dir.
+// Herkes 50 overall'dan başlar. Attığı gol, yaptığı asist ve müdahale/kurtarışlara
+// göre kartın gücü (overall) otomatik yükselir. Üst sınır 99, alt sınır 50'dir.
 function computeOverall(p) {
-  const mp = Math.max(p.mp || 0, 1);
-  const perMatch = {
-    g: (p.g || 0) / mp,
-    a: (p.a || 0) / mp,
-    tackles: (p.tackles || 0) / mp,
-    saves: (p.saves || 0) / mp
-  };
-  const impact = perMatch.g * 9 + perMatch.a * 5 + perMatch.tackles * 1.6 + perMatch.saves * 2.2;
-  // Az sayıda maçta atılan tesadüfi bir gol/asistin overall'ı sıçratmasını
-  // engellemek için ilk birkaç maç boyunca etkiyi hafifçe yumuşat.
-  const sampleDamp = Math.min(1, mp / 3);
-  return Math.max(50, Math.min(99, Math.round(50 + impact * sampleDamp)));
+  const impact = (p.g || 0) * 3 + (p.a || 0) * 2 + (p.tackles || 0) * 1 + (p.saves || 0) * 1.2;
+  return Math.max(50, Math.min(99, 50 + Math.round(impact / 2)));
 }
 
 function tierInfo(overall) {
@@ -176,7 +153,6 @@ export default function App() {
     const map = {};
     Object.values(matches).forEach(m => {
       const addAll = (players, team) => (players || []).forEach(p => {
-        if (isLikelyTeamGhost(p.name, team)) return;
         const key = `${p.name}__${team}`;
         if (!map[key]) map[key] = { name: p.name, team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0 };
         const r = map[key];
@@ -286,7 +262,7 @@ export default function App() {
 
         {page === "stats" && <PlayerStatsPage playerStats={playerStats} />}
 
-        {page === "cards" && <CardsPage playerCards={playerCards} teams={teams} />}
+        {page === "cards" && <CardsPage playerCards={playerCards} />}
 
         {page === "admin" && (
           adminUnlocked ? (
@@ -547,20 +523,19 @@ function LeaderList({ icon: Icon, title, data, field }) {
 }
 
 // ---------- Kart sistemi ----------
-function CardsPage({ playerCards, teams = [] }) {
+function CardsPage({ playerCards }) {
   const newPlayers = playerCards.filter(p => p.isNew);
   const active = [...playerCards.filter(p => !p.isNew)].sort((a, b) => b.overall - a.overall || b.g - a.g || b.a - a.a);
-  const logoByTeam = useMemo(() => Object.fromEntries(teams.map(t => [t.name, t.logo])), [teams]);
 
   return (
-    <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Kart gücü, maç başına ortalama gol/asist/müdahale/kurtarış performansına göre yükselir.">
+    <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Attığı gol, yaptığı asist ve müdahale/kurtarışlara göre kartın gücü otomatik yükselir.">
       {newPlayers.length > 0 && (
         <>
           <div className="sectionHead" style={{ marginBottom: 16 }}>
             <div><div className="eyebrow">HENÜZ MAÇ OYNAMADI</div><h1 style={{ fontSize: 26 }}>Yeni Oyuncular</h1></div>
           </div>
           <div className="cardGrid">
-            {newPlayers.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} logo={logoByTeam[p.team]} />)}
+            {newPlayers.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} />)}
           </div>
         </>
       )}
@@ -573,52 +548,31 @@ function CardsPage({ playerCards, teams = [] }) {
         <p className="emptyNote">Henüz kart oluşturacak oyuncu verisi yok. Bir maç yükleyince veya Yönetim panelinden oyuncu ekleyince burada görünecek.</p>
       ) : (
         <div className="cardGrid">
-          {active.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} logo={logoByTeam[p.team]} />)}
+          {active.map(p => <PlayerCard key={`${p.name}__${p.team}`} player={p} />)}
         </div>
       )}
     </Section>
   );
 }
 
-function PlayerCard({ player, logo }) {
+function PlayerCard({ player }) {
   const tier = tierInfo(player.overall);
-  const initials = player.name.trim().split(/\s+/).map(x => x[0]).join("").slice(0, 2).toUpperCase();
   return (
     <div className={`pcard tier-${tier.key}`}>
-      <div className="pcard-frame">
-        <div className="pcard-shine" />
-        <div className="pcard-texture" />
-        {player.isNew && <span className="pcard-newTag">YENİ</span>}
-
-        <div className="pcard-head">
-          <div className="pcard-headleft">
-            <span className="pcard-overall">{player.overall}</span>
-            <span className="pcard-tier">{tier.label}</span>
-            <span className="pcard-crest">
-              {logo ? <img src={logo} alt="" /> : <span className="pcard-crestFallback">{player.team.split(" ").map(x => x[0]).join("").slice(0, 3)}</span>}
-            </span>
-          </div>
-          <div className="pcard-portrait"><span>{initials}</span></div>
-        </div>
-
-        <div className="pcard-namebar">
-          <div className="pcard-name">{player.name}</div>
-          <div className="pcard-team">{player.team}</div>
-        </div>
-
-        <div className="pcard-divider" />
-
-        <div className="pcard-stats">
-          <div className="pcard-statCol">
-            <div><b>{player.g}</b><span>GOL</span></div>
-            <div><b>{player.a}</b><span>ASİST</span></div>
-          </div>
-          <div className="pcard-statSep" />
-          <div className="pcard-statCol">
-            <div><b>{player.saves}</b><span>KURT.</span></div>
-            <div><b>{player.mp}</b><span>MAÇ</span></div>
-          </div>
-        </div>
+      <div className="pcard-shine" />
+      {player.isNew && <span className="pcard-newTag">YENİ</span>}
+      <div className="pcard-top">
+        <span className="pcard-overall">{player.overall}</span>
+        <span className="pcard-tier">{tier.label}</span>
+      </div>
+      <div className="pcard-name">{player.name}</div>
+      <div className="pcard-team">{player.team}</div>
+      <div className="pcard-divider" />
+      <div className="pcard-stats">
+        <div><b>{player.g}</b><span>GOL</span></div>
+        <div><b>{player.a}</b><span>ASİST</span></div>
+        <div><b>{player.saves}</b><span>KURT.</span></div>
+        <div><b>{player.mp}</b><span>MAÇ</span></div>
       </div>
     </div>
   );
@@ -885,8 +839,8 @@ function MatchDetail({ match, goBack }) {
       )}
 
       <div className="team-tables">
-        <PlayerTable teamName={match.homeTeam} players={(match.homePlayers || []).filter(p => !isLikelyTeamGhost(p.name, match.homeTeam))} type="home" />
-        <PlayerTable teamName={match.awayTeam} players={(match.awayPlayers || []).filter(p => !isLikelyTeamGhost(p.name, match.awayTeam))} type="away" />
+        <PlayerTable teamName={match.homeTeam} players={match.homePlayers} type="home" />
+        <PlayerTable teamName={match.awayTeam} players={match.awayPlayers} type="away" />
       </div>
     </div>
   );
