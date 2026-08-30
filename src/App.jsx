@@ -286,6 +286,24 @@ export default function App() {
     go("matchDetail");
   };
 
+  const deleteMatch = matchId => {
+    if (!window.confirm("Bu maç istatistiği silinsin mi? Skor ve oyuncu istatistikleri kaldırılacak.")) return;
+    setMatches(prev => {
+      const updated = { ...prev };
+      delete updated[matchId];
+      return updated;
+    });
+    setFixtures(prev => prev.map(f =>
+      f.matchId === matchId
+        ? { ...f, status: "Yakında", date: "Yakında", matchId: undefined }
+        : f
+    ));
+    if (activeMatchId === matchId) {
+      setActiveMatchId(null);
+      go("fixtures");
+    }
+  };
+
   const resetAllData = () => {
     if (!window.confirm("Tüm takımlar, fikstür ve maç verileri silinip demo veriyle değiştirilecek. Emin misin?")) return;
     setTeams(INITIAL_TEAMS);
@@ -351,6 +369,7 @@ export default function App() {
                 teams={teams} setTeams={setTeams}
                 fixtures={fixtures} setFixtures={setFixtures}
                 manualPlayers={manualPlayers} setManualPlayers={setManualPlayers}
+                matches={matches} onDeleteMatch={deleteMatch}
                 onUpload={handleMatchUpload} onReset={resetAllData}
                 onLock={lockAdmin}
               />
@@ -716,7 +735,7 @@ function AdminGate({ onUnlock }) {
 }
 
 // ---------- Yönetim paneli ----------
-function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, onUpload, onReset, onLock }) {
+function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, matches, onDeleteMatch, onUpload, onReset, onLock }) {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamLogo, setNewTeamLogo] = useState(null);
   const [teamLogoError, setTeamLogoError] = useState("");
@@ -928,6 +947,20 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
               <div key={p.id} className="adminListItem">
                 <span><b>{p.name}</b> <small>({p.team})</small></span>
                 <button onClick={() => deletePlayer(p.id)} className="danger"><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="adminCard">
+          <h3><Trash2 size={20} /> Yüklenen Maçlar</h3>
+          <p>Hatalı yüklenen ya da kaldırılmak istenen bir maç istatistiğini buradan silebilirsin. Silinince ilgili fikstür maddesi otomatik olarak "Yakında" durumuna döner, puan durumu ve oyuncu kartları da güncellenir.</p>
+          <div className="adminList">
+            {Object.keys(matches).length === 0 && <p className="emptyNote small">Henüz yüklenmiş bir maç yok.</p>}
+            {Object.values(matches).map(m => (
+              <div key={m.id} className="adminListItem">
+                <span><b>{m.homeTeam}</b> {m.homeScore} - {m.awayScore} <b>{m.awayTeam}</b></span>
+                <button onClick={() => onDeleteMatch(m.id)} className="danger"><Trash2 size={14} /></button>
               </div>
             ))}
           </div>
