@@ -4,19 +4,13 @@ import {
   ChevronRight, X, Menu, BarChart2, Crosshair, Share2, Hand,
   ShieldCheck, RotateCcw, Radio, CreditCard, Image as ImageIcon, Lock, LogOut
 } from "lucide-react";
-import { parseMatchHTML, successCount } from "./lib/parseMatch.js";
+import { parseMatchHTML, parseMatchJSON, successCount } from "./lib/parseMatch.js";
 
-// Kod her güncellendiğinde bu sürümü artır — tarayıcıdaki eski localStorage
-// verisi otomatik temizlenir ve yeni demo veriler yüklenir.
-const DATA_VERSION = "5";
-
-// Yönetim paneli şifresi. Değiştirmek istersen sadece tırnak içindeki
-// kelimeyi değiştirip dosyayı kaydetmen yeterli.
-// NOT: Bu koruma sadece rastgele ziyaretçileri caydırmak içindir — kod
-// tarayıcıya gönderildiği için teknik olarak görüntülenebilir. Gerçek
-// bir "kimse göremesin" güvenliği için sunucu taraflı bir giriş sistemi
-// gerekir.
-const ADMIN_PASSWORD = "asl2026";
+// Yönetim paneli şifresi artık kodda YOK. Şifre, Vercel projesinin
+// ortam değişkenlerinde (ADMIN_PASSWORD) tutulur ve doğrulama
+// /api/login üzerinden sunucu tarafında yapılır — tarayıcıya asla
+// gönderilmez. Değiştirmek istersen Vercel > Settings > Environment
+// Variables kısmından güncelleyip yeniden deploy etmen yeterli.
 
 const INITIAL_TEAMS = [
   { id: "3", name: "Metospor FK" },
@@ -35,25 +29,6 @@ const INITIAL_FIXTURES = [
 
 const INITIAL_MATCHES = {};
 
-// ---------- Depolama yardımcıları ----------
-function bootstrapStorage() {
-  try {
-    if (localStorage.getItem("asl_version") !== DATA_VERSION) {
-      ["asl_teams", "asl_fixtures", "asl_matches", "asl_manualPlayers"].forEach(k => localStorage.removeItem(k));
-      localStorage.setItem("asl_version", DATA_VERSION);
-    }
-  } catch { /* localStorage kullanılamıyorsa sessizce geç */ }
-}
-
-function readStorage(key, fallback) {
-  try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 // ---------- Kart sistemi: overall hesaplama ----------
 // Herkes 50 overall'dan başlar. Attığı gol, yaptığı asist ve müdahale/kurtarışlara
 // göre kartın gücü (overall) otomatik yükselir. Üst sınır 99, alt sınır 50'dir.
@@ -68,6 +43,29 @@ function tierInfo(overall) {
   if (overall >= 70) return { key: "gold", label: "ALTIN" };
   if (overall >= 60) return { key: "silver", label: "GÜMÜŞ" };
   return { key: "bronze", label: "BRONZ" };
+}
+
+// ---------- Dosya okuma yardımcısı: BOM'a bakarak UTF-8/UTF-16 otomatik algılar ----------
+// Oyunun dışa aktardığı JSON dosyaları bazen UTF-16 kodlamasıyla geliyor;
+// düz readAsText bunu bozuk karakterlere çevirebiliyor, bu yüzden dosyayı
+// ham byte olarak okuyup doğru kodlamayla çözüyoruz.
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      let encoding = "utf-8";
+      if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) encoding = "utf-16le";
+      else if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) encoding = "utf-16be";
+      try {
+        resolve(new TextDecoder(encoding).decode(reader.result));
+      } catch {
+        resolve(new TextDecoder("utf-8").decode(reader.result));
+      }
+    };
+    reader.onerror = () => reject(new Error("Dosya okunamadı."));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 // ---------- Görsel yardımcı: takım logosunu sıkıştırıp base64'e çevirir ----------
@@ -100,33 +98,103 @@ function resizeImageFile(file, maxSize = 240) {
 
 // ---------- Ana uygulama ----------
 export default function App() {
-  bootstrapStorage();
-
   const [page, setPage] = useState("home");
   const [open, setOpen] = useState(false);
   const [activeMatchId, setActiveMatchId] = useState(null);
 
-  const [teams, setTeams] = useState(() => readStorage("asl_teams", INITIAL_TEAMS));
-  const [fixtures, setFixtures] = useState(() => readStorage("asl_fixtures", INITIAL_FIXTURES));
-  const [matches, setMatches] = useState(() => readStorage("asl_matches", INITIAL_MATCHES));
-  const [manualPlayers, setManualPlayers] = useState(() => readStorage("asl_manualPlayers", []));
-  const [adminUnlocked, setAdminUnlocked] = useState(() => {
-    try { return sessionStorage.getItem("asl_admin_unlocked") === "1"; } catch { return false; }
-  });
+  const [teams, setTeams] = useState(INITIAL_TEAMS);
+  const [fixtures, setFixtures] = useState(INITIAL_FIXTURES);
+  const [matches, setMatches] = useState(INITIAL_MATCHES);
+  const [manualPlayers, setManualPlayers] = useState([]);
 
-  const unlockAdmin = () => {
-    setAdminUnlocked(true);
-    try { sessionStorage.setItem("asl_admin_unlocked", "1"); } catch { /* geç */ }
-  };
+  const [loading, setLoading] = useState(true);
+  const [kvConfigured, setKvConfigured] = useState(true);
+  const [saveError, setSaveError] = useState("");
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+
+  const loadedRef = React.useRef(false);
+  const saveTimer = React.useRef(null);
+
+  // İlk açılışta herkesin gördüğü ortak veriyi ve admin oturum durumunu
+  // sunucudan çek. Artık kaynak localStorage değil, /api/state.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [stateRes, sessionRes] = await Promise.all([
+          fetch("/api/state"),
+          fetch("/api/session")
+        ]);
+        const stateData = await stateRes.json();
+        const sessionData = await sessionRes.json().catch(() => ({}));
+        if (cancelled) return;
+        setTeams(stateData.teams || INITIAL_TEAMS);
+        setFixtures(stateData.fixtures || INITIAL_FIXTURES);
+        setMatches(stateData.matches || INITIAL_MATCHES);
+        setManualPlayers(stateData.manualPlayers || []);
+        setKvConfigured(stateData.kvConfigured !== false);
+        setAdminUnlocked(Boolean(sessionData.authenticated));
+      } catch {
+        // Sunucuya ulaşılamadı — demo veriyle devam ediyoruz.
+      } finally {
+        if (!cancelled) {
+          loadedRef.current = true;
+          setLoading(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const unlockAdmin = () => setAdminUnlocked(true);
   const lockAdmin = () => {
+    fetch("/api/logout", { method: "POST" }).catch(() => {});
     setAdminUnlocked(false);
-    try { sessionStorage.removeItem("asl_admin_unlocked"); } catch { /* geç */ }
   };
 
-  useEffect(() => { localStorage.setItem("asl_teams", JSON.stringify(teams)); }, [teams]);
-  useEffect(() => { localStorage.setItem("asl_fixtures", JSON.stringify(fixtures)); }, [fixtures]);
-  useEffect(() => { localStorage.setItem("asl_matches", JSON.stringify(matches)); }, [matches]);
-  useEffect(() => { localStorage.setItem("asl_manualPlayers", JSON.stringify(manualPlayers)); }, [manualPlayers]);
+  // Admin veri değiştirdikçe ortak sunucuya kaydet (kısa bir gecikmeyle,
+  // her tuş vuruşunda ayrı istek atmamak için).
+  useEffect(() => {
+    if (!loadedRef.current || !adminUnlocked) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ teams, fixtures, matches, manualPlayers })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          setSaveError(err.error || "Kaydedilemedi.");
+          if (res.status === 401) setAdminUnlocked(false);
+        } else {
+          setSaveError("");
+        }
+      } catch {
+        setSaveError("Sunucuya ulaşılamadı.");
+      }
+    }, 600);
+    return () => clearTimeout(saveTimer.current);
+  }, [teams, fixtures, matches, manualPlayers, adminUnlocked]);
+
+  // Yönetici olmayan ziyaretçiler için: sayfa açıkken periyodik olarak
+  // sunucudaki en güncel veriyi çek, böylece maç/skor güncellemelerini
+  // sayfayı yenilemeden görürler.
+  useEffect(() => {
+    if (adminUnlocked) return;
+    const id = setInterval(async () => {
+      try {
+        const res = await fetch("/api/state");
+        const data = await res.json();
+        setTeams(data.teams || INITIAL_TEAMS);
+        setFixtures(data.fixtures || INITIAL_FIXTURES);
+        setMatches(data.matches || INITIAL_MATCHES);
+        setManualPlayers(data.manualPlayers || []);
+      } catch { /* geç */ }
+    }, 12000);
+    return () => clearInterval(id);
+  }, [adminUnlocked]);
 
   // ---- Puan durumu (otomatik) ----
   const standings = useMemo(() => {
@@ -218,12 +286,26 @@ export default function App() {
     go("matchDetail");
   };
 
+  const deleteMatch = matchId => {
+    if (!window.confirm("Bu maç istatistiği silinsin mi? Skor ve oyuncu istatistikleri kaldırılacak.")) return;
+    setMatches(prev => {
+      const updated = { ...prev };
+      delete updated[matchId];
+      return updated;
+    });
+    setFixtures(prev => prev.map(f =>
+      f.matchId === matchId
+        ? { ...f, status: "Yakında", date: "Yakında", matchId: undefined }
+        : f
+    ));
+    if (activeMatchId === matchId) {
+      setActiveMatchId(null);
+      go("fixtures");
+    }
+  };
+
   const resetAllData = () => {
     if (!window.confirm("Tüm takımlar, fikstür ve maç verileri silinip demo veriyle değiştirilecek. Emin misin?")) return;
-    localStorage.removeItem("asl_teams");
-    localStorage.removeItem("asl_fixtures");
-    localStorage.removeItem("asl_matches");
-    localStorage.removeItem("asl_manualPlayers");
     setTeams(INITIAL_TEAMS);
     setFixtures(INITIAL_FIXTURES);
     setMatches(INITIAL_MATCHES);
@@ -248,37 +330,56 @@ export default function App() {
       </header>
 
       <main className="wrap">
-        {page === "home" && (
+        {loading && (
+          <div className="emptyNote" style={{ textAlign: "center", padding: "60px 0" }}>
+            Yükleniyor...
+          </div>
+        )}
+
+        {!loading && page === "home" && (
           <HomePage go={go} teams={teams} fixtures={fixtures} matches={matches} standings={standings} playerStats={playerStats} />
         )}
 
-        {page === "teams" && <TeamsPage teams={teams} standings={standings} />}
+        {!loading && page === "teams" && <TeamsPage teams={teams} standings={standings} />}
 
-        {page === "standings" && <StandingsPage standings={standings} />}
+        {!loading && page === "standings" && <StandingsPage standings={standings} />}
 
-        {page === "fixtures" && (
+        {!loading && page === "fixtures" && (
           <FixturesPage fixtures={fixtures} onOpenMatch={id => { setActiveMatchId(id); go("matchDetail"); }} />
         )}
 
-        {page === "stats" && <PlayerStatsPage playerStats={playerStats} />}
+        {!loading && page === "stats" && <PlayerStatsPage playerStats={playerStats} />}
 
-        {page === "cards" && <CardsPage playerCards={playerCards} />}
+        {!loading && page === "cards" && <CardsPage playerCards={playerCards} />}
 
-        {page === "admin" && (
-          adminUnlocked ? (
-            <AdminPanel
-              teams={teams} setTeams={setTeams}
-              fixtures={fixtures} setFixtures={setFixtures}
-              manualPlayers={manualPlayers} setManualPlayers={setManualPlayers}
-              onUpload={handleMatchUpload} onReset={resetAllData}
-              onLock={lockAdmin}
-            />
-          ) : (
-            <AdminGate onUnlock={unlockAdmin} />
-          )
+        {!loading && page === "admin" && (
+          <>
+            {!kvConfigured && (
+              <div className="errorNote" style={{ marginBottom: 16 }}>
+                ⚠️ Ortak veritabanı (Vercel KV) henüz bağlı değil — yaptığın değişiklikler kalıcı olarak
+                kaydedilmeyecek, sadece bu tarayıcı oturumunda görünecek. Kurulum için Vercel projende
+                Storage &gt; Create Database &gt; KV adımlarını takip et ve projeye bağla.
+              </div>
+            )}
+            {saveError && (
+              <div className="errorNote" style={{ marginBottom: 16 }}>⚠️ {saveError}</div>
+            )}
+            {adminUnlocked ? (
+              <AdminPanel
+                teams={teams} setTeams={setTeams}
+                fixtures={fixtures} setFixtures={setFixtures}
+                manualPlayers={manualPlayers} setManualPlayers={setManualPlayers}
+                matches={matches} onDeleteMatch={deleteMatch}
+                onUpload={handleMatchUpload} onReset={resetAllData}
+                onLock={lockAdmin}
+              />
+            ) : (
+              <AdminGate onUnlock={unlockAdmin} />
+            )}
+          </>
         )}
 
-        {page === "matchDetail" && activeMatchId && matches[activeMatchId] && (
+        {!loading && page === "matchDetail" && activeMatchId && matches[activeMatchId] && (
           <MatchDetail match={matches[activeMatchId]} goBack={() => go("fixtures")} />
         )}
       </main>
@@ -582,14 +683,29 @@ function PlayerCard({ player }) {
 function AdminGate({ onUnlock }) {
   const [pw, setPw] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const submit = e => {
+  const submit = async e => {
     e.preventDefault();
-    if (pw === ADMIN_PASSWORD) {
-      onUnlock();
-    } else {
-      setError("Şifre yanlış. Tekrar dene.");
-      setPw("");
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw })
+      });
+      if (res.ok) {
+        onUnlock();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Şifre yanlış. Tekrar dene.");
+        setPw("");
+      }
+    } catch {
+      setError("Sunucuya ulaşılamadı. Bağlantını kontrol et.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -606,8 +722,11 @@ function AdminGate({ onUnlock }) {
             value={pw}
             onChange={e => { setPw(e.target.value); setError(""); }}
             autoFocus
+            disabled={busy}
           />
-          <button type="submit" className="primary">Giriş Yap</button>
+          <button type="submit" className="primary" disabled={busy}>
+            {busy ? "Kontrol ediliyor..." : "Giriş Yap"}
+          </button>
         </form>
         {error && <p className="errorNote">{error}</p>}
       </div>
@@ -616,7 +735,7 @@ function AdminGate({ onUnlock }) {
 }
 
 // ---------- Yönetim paneli ----------
-function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, onUpload, onReset, onLock }) {
+function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, matches, onDeleteMatch, onUpload, onReset, onLock }) {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamLogo, setNewTeamLogo] = useState(null);
   const [teamLogoError, setTeamLogoError] = useState("");
@@ -626,22 +745,64 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerTeam, setNewPlayerTeam] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [pendingJson, setPendingJson] = useState(null);
+  const [jsonHome, setJsonHome] = useState("");
+  const [jsonAway, setJsonAway] = useState("");
 
-  const handleFileUpload = e => {
+  const handleFileUpload = async e => {
     const file = e.target.files[0];
     if (!file) return;
     setUploadError("");
-    const reader = new FileReader();
-    reader.onload = evt => {
+    const isJson = file.name.toLowerCase().endsWith(".json");
+    let text;
+    try {
+      text = await readFileText(file);
+    } catch {
+      setUploadError("Dosya okunamadı.");
+      e.target.value = "";
+      return;
+    }
+    if (isJson) {
       try {
-        onUpload(parseMatchHTML(evt.target.result));
-      } catch (err) {
+        const data = JSON.parse(text);
+        if (!Array.isArray(data.players)) throw new Error("Geçersiz JSON yapısı.");
+        setPendingJson(data);
+        setJsonHome("");
+        setJsonAway("");
+      } catch {
+        setUploadError("Dosya okunurken hata oluştu. Lütfen geçerli bir maç istatistik JSON dosyası yükleyin.");
+      }
+    } else {
+      try {
+        onUpload(parseMatchHTML(text));
+      } catch {
         setUploadError("Dosya okunurken hata oluştu. Lütfen geçerli bir maç istatistik HTML dosyası yükleyin.");
       }
-    };
-    reader.onerror = () => setUploadError("Dosya okunamadı.");
-    reader.readAsText(file);
+    }
     e.target.value = "";
+  };
+
+  const confirmJsonImport = () => {
+    if (!jsonHome || !jsonAway || jsonHome === jsonAway) {
+      setUploadError("Ev sahibi ve deplasman için farklı iki takım seç.");
+      return;
+    }
+    try {
+      onUpload(parseMatchJSON(pendingJson, jsonHome, jsonAway));
+      setPendingJson(null);
+      setJsonHome("");
+      setJsonAway("");
+      setUploadError("");
+    } catch (err) {
+      setUploadError(err.message || "İçe aktarılamadı.");
+    }
+  };
+
+  const cancelJsonImport = () => {
+    setPendingJson(null);
+    setJsonHome("");
+    setJsonAway("");
+    setUploadError("");
   };
 
   const handleNewTeamLogo = async e => {
@@ -706,11 +867,32 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
       <div className="adminGrid">
         <div className="adminCard">
           <h3><Upload size={20} /> Maç İstatistiği Dosyası Yükle</h3>
-          <p>Oynanan maçın HTML istatistik raporunu yükle. Skorlar, gol/asist/kurtarış istatistikleri, puan durumu ve oyuncu kartları anında güncellenir.</p>
+          <p>Oynanan maçın HTML ya da JSON istatistik raporunu yükle. Skorlar, gol/asist/kurtarış istatistikleri, puan durumu ve oyuncu kartları anında güncellenir.</p>
           <label className="fileInputLabel">
-            <input type="file" accept=".html,.htm" onChange={handleFileUpload} />
-            <span>Dosya Seç veya Sürükle (HTML)</span>
+            <input type="file" accept=".html,.htm,.json" onChange={handleFileUpload} />
+            <span>Dosya Seç veya Sürükle (HTML / JSON)</span>
           </label>
+          {pendingJson && (
+            <div className="formStack" style={{ marginTop: 12 }}>
+              <p className="emptyNote small">
+                JSON okundu — {pendingJson.players.length} oyuncu, skor{" "}
+                {pendingJson.score?.home ?? 0} - {pendingJson.score?.away ?? 0}.
+                Bu veride "home" / "away" olarak geçen taraflar gerçekte hangi takımlar?
+              </p>
+              <select value={jsonHome} onChange={e => setJsonHome(e.target.value)}>
+                <option value="">Ev Sahibi Takımı Seç</option>
+                {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select>
+              <select value={jsonAway} onChange={e => setJsonAway(e.target.value)}>
+                <option value="">Deplasman Takımını Seç</option>
+                {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select>
+              <div className="adminTopBar">
+                <button type="button" className="primary" onClick={confirmJsonImport}>İçe Aktar</button>
+                <button type="button" className="lockBtn" onClick={cancelJsonImport}>Vazgeç</button>
+              </div>
+            </div>
+          )}
           {uploadError && <p className="errorNote">{uploadError}</p>}
         </div>
 
@@ -765,6 +947,20 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
               <div key={p.id} className="adminListItem">
                 <span><b>{p.name}</b> <small>({p.team})</small></span>
                 <button onClick={() => deletePlayer(p.id)} className="danger"><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="adminCard">
+          <h3><Trash2 size={20} /> Yüklenen Maçlar</h3>
+          <p>Hatalı yüklenen ya da kaldırılmak istenen bir maç istatistiğini buradan silebilirsin. Silinince ilgili fikstür maddesi otomatik olarak "Yakında" durumuna döner, puan durumu ve oyuncu kartları da güncellenir.</p>
+          <div className="adminList">
+            {Object.keys(matches).length === 0 && <p className="emptyNote small">Henüz yüklenmiş bir maç yok.</p>}
+            {Object.values(matches).map(m => (
+              <div key={m.id} className="adminListItem">
+                <span><b>{m.homeTeam}</b> {m.homeScore} - {m.awayScore} <b>{m.awayTeam}</b></span>
+                <button onClick={() => onDeleteMatch(m.id)} className="danger"><Trash2 size={14} /></button>
               </div>
             ))}
           </div>

@@ -67,6 +67,67 @@ export function parseMatchHTML(htmlContent) {
   };
 }
 
+// Oyunun dışa aktardığı JSON maç raporunu ayrıştırır.
+// Beklenen yapı: { match_id, stadium, score:{home,away}, winner,
+// players: [{ username, team: "home"|"away", stats:{ goals, assists,
+// passes, poke_tackles_performed, slide_tackles_performed, catches,
+// deflects, wins, losses } }] }
+// JSON'da gerçek takım isimleri olmadığı (sadece "home"/"away" etiketi
+// olduğu) için, hangi gerçek takımın ev sahibi/deplasman olduğu dışarıdan
+// (admin panelinden seçilerek) verilir.
+export function parseMatchJSON(data, homeTeamName, awayTeamName) {
+  if (!data || !Array.isArray(data.players)) {
+    throw new Error("Dosyada tanınabilir bir maç istatistiği bulunamadı.");
+  }
+  if (!homeTeamName || !awayTeamName) {
+    throw new Error("Ev sahibi ve deplasman takımını seçmelisin.");
+  }
+
+  const mapPlayer = p => {
+    const s = p.stats || {};
+    const poke = s.poke_tackles_performed || 0;
+    const slide = s.slide_tackles_performed || 0;
+    return {
+      name: p.username || "Oyuncu",
+      g: s.goals || 0,
+      a: s.assists || 0,
+      pass: s.passes || 0,
+      foot: `${poke}/${poke}`,
+      slide: `${slide}/${slide}`,
+      def: s.deflects || 0,
+      catch: s.catches || 0
+    };
+  };
+
+  const homePlayers = data.players.filter(p => p.team === "home").map(mapPlayer);
+  const awayPlayers = data.players.filter(p => p.team === "away").map(mapPlayer);
+
+  if (homePlayers.length === 0 && awayPlayers.length === 0) {
+    throw new Error("Dosyada tanınabilir bir maç istatistiği bulunamadı.");
+  }
+
+  const homeScore = data.score?.home ?? 0;
+  const awayScore = data.score?.away ?? 0;
+  const resultText =
+    data.winner === "home" ? `${homeTeamName} kazandı` :
+    data.winner === "away" ? `${awayTeamName} kazandı` :
+    "Berabere";
+
+  return {
+    id: `match_${data.match_id || Date.now()}`,
+    stadium: data.stadium || "Bilinmeyen Stadyum",
+    homeTeam: homeTeamName,
+    awayTeam: awayTeamName,
+    homeScore,
+    awayScore,
+    resultText,
+    periods: [],
+    leaders: [],
+    homePlayers,
+    awayPlayers
+  };
+}
+
 // Bir maçın oyuncu satırından başarılı müdahale sayısını çıkarır ("3/21" -> 3)
 export function successCount(value) {
   return parseInt(String(value || "0").split("/")[0], 10) || 0;
