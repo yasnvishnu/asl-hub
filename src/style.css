@@ -268,58 +268,98 @@ footer span { float: right; color: var(--muted); }
 .tinyUpload:hover { color: var(--amber); border-color: var(--amber); }
 .tinyUpload input { display: none; }
 
-/* ---------- Oyuncu kartları ---------- */
-.cardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
+/* ---------- Oyuncu kartları (kalkan/nişan formunda "FUT tarzı" kart) ---------- */
+.cardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 26px 18px; justify-items: center; }
 
 .pcard {
-  position: relative; border-radius: 20px; padding: 20px 18px 18px; min-height: 220px;
-  overflow: hidden; isolation: isolate; border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35); transition: transform 0.2s ease, box-shadow 0.2s ease;
-  display: flex; flex-direction: column;
+  position: relative; width: 100%; max-width: 226px; aspect-ratio: 0.68;
+  clip-path: polygon(0% 7%, 7% 0%, 93% 0%, 100% 7%, 100% 76%, 50% 100%, 0% 76%);
+  overflow: hidden; isolation: isolate; border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4); transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.pcard:hover { transform: translateY(-5px) scale(1.015); box-shadow: 0 26px 60px rgba(0, 0, 0, 0.5); }
+.pcard:hover { transform: translateY(-6px) scale(1.02); box-shadow: 0 28px 60px rgba(0, 0, 0, 0.55); }
 
 .pcard-shine {
   position: absolute; inset: -50%; z-index: 0; pointer-events: none; transform: rotate(8deg);
-  background: linear-gradient(120deg, transparent 32%, rgba(255, 255, 255, 0.16) 48%, transparent 62%);
+  background: linear-gradient(120deg, transparent 32%, rgba(255, 255, 255, 0.18) 48%, transparent 62%);
 }
 
 .pcard-newTag {
-  position: absolute; top: 14px; right: 14px; z-index: 2; background: var(--amber); color: #140d02;
-  font-family: var(--font-mono); font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em;
-  padding: 4px 8px; border-radius: 6px;
+  position: absolute; top: 12px; right: 12px; z-index: 3; background: var(--amber); color: #140d02;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
+  padding: 4px 7px; border-radius: 6px;
 }
 
-.pcard-top { position: relative; z-index: 1; display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
-.pcard-overall { font-family: var(--font-display); font-size: 44px; font-weight: 800; line-height: 1; }
-.pcard-tier { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; opacity: 0.85; text-transform: uppercase; }
+.pcard-inner {
+  position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column;
+  padding: 22px 16px 34px; box-sizing: border-box;
+}
 
-.pcard-name { position: relative; z-index: 1; font-family: var(--font-display); font-size: 20px; font-weight: 700; text-transform: uppercase; line-height: 1.08; margin-bottom: 2px; overflow-wrap: break-word; }
-.pcard-team { position: relative; z-index: 1; font-size: 11px; font-family: var(--font-mono); opacity: 0.8; margin-bottom: auto; }
+.pcard-head { display: flex; align-items: flex-start; justify-content: space-between; }
 
-.pcard-divider { position: relative; z-index: 1; height: 1px; background: rgba(255, 255, 255, 0.2); margin: 14px 0 10px; }
+.pcard-rating { display: flex; flex-direction: column; align-items: flex-start; line-height: 1; }
+.pcard-overall { font-family: var(--font-display); font-size: 38px; font-weight: 800; line-height: 1; }
+.pcard-tier { font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.09em; opacity: 0.85; text-transform: uppercase; margin-top: 4px; }
 
-.pcard-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.pcard-photo {
+  width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+  display: grid; place-items: center; background: rgba(0, 0, 0, 0.18);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+}
+.pcard-photo span { font-family: var(--font-display); font-size: 18px; font-weight: 800; opacity: 0.85; }
+
+.pcard-nameplate { margin-top: 14px; }
+.pcard-name {
+  font-family: var(--font-display); font-size: 19px; font-weight: 700; text-transform: uppercase;
+  line-height: 1.05; overflow-wrap: break-word;
+}
+.pcard-teamRow { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.pcard-teamDot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.6; flex-shrink: 0; }
+.pcard-team { font-size: 10.5px; font-family: var(--font-mono); opacity: 0.8; }
+
+.pcard-divider { height: 1px; background: rgba(255, 255, 255, 0.22); margin: 14px 0 10px; }
+
+.pcard-stats { margin-top: auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .pcard-stats div { text-align: center; }
-.pcard-stats b { display: block; font-family: var(--font-display); font-size: 17px; font-weight: 700; }
-.pcard-stats span { display: block; font-size: 8.5px; font-family: var(--font-mono); letter-spacing: 0.03em; opacity: 0.7; margin-top: 2px; }
+.pcard-stats b { display: block; font-family: var(--font-display); font-size: 16px; font-weight: 700; }
+.pcard-stats span { display: block; font-size: 8px; font-family: var(--font-mono); letter-spacing: 0.03em; opacity: 0.7; margin-top: 2px; }
 
-.tier-bronze { color: #f3e2cf; background: linear-gradient(160deg, #9a6a3f, #663f22 55%, #3d2614); }
+/* Bronz — sade bronz/bakır ton */
+.tier-bronze { color: #f3e2cf; background: linear-gradient(160deg, #a5714a, #6d4223 55%, #3d2614); }
 .tier-bronze .pcard-overall, .tier-bronze .pcard-tier { color: #ffd9a8; }
 
-.tier-silver { color: #131720; background: linear-gradient(160deg, #d7dce4, #9aa1ac 55%, #656d78); }
+/* Gümüş — sade gümüş ton */
+.tier-silver { color: #131720; background: linear-gradient(160deg, #eef1f5, #a7aeb8 55%, #6a7280); }
 .tier-silver .pcard-overall, .tier-silver .pcard-tier { color: #1c2733; }
 
-.tier-gold { color: #2a1c02; background: linear-gradient(160deg, #ffedb0, #eab74e 55%, #ab7a20); }
+/* Altın — parlak altın ton */
+.tier-gold { color: #2a1c02; background: linear-gradient(160deg, #fff3c4, #eab74e 52%, #a8721c); }
 .tier-gold .pcard-overall, .tier-gold .pcard-tier { color: #3a2601; }
 
-.tier-elite { color: #d7d7de; background: linear-gradient(160deg, #302f38, #131318 55%, #050506); border-color: rgba(255, 215, 120, 0.35); }
+/* Elit — koyu zemin + altın yıldız desenli "form dışı" hissi */
+.tier-elite {
+  color: #d7d7de; border-color: rgba(255, 215, 120, 0.4);
+  background:
+    radial-gradient(3px 3px at 20% 24%, rgba(255, 213, 110, 0.55) 0, transparent 60%),
+    radial-gradient(2px 2px at 68% 40%, rgba(255, 213, 110, 0.4) 0, transparent 60%),
+    radial-gradient(2.5px 2.5px at 40% 66%, rgba(255, 213, 110, 0.45) 0, transparent 60%),
+    radial-gradient(2px 2px at 82% 78%, rgba(255, 213, 110, 0.4) 0, transparent 60%),
+    linear-gradient(160deg, #302f38, #131318 55%, #050506);
+}
 .tier-elite .pcard-overall { color: #ffd76b; }
 .tier-elite .pcard-tier { color: #ffb545; }
+.tier-elite .pcard-photo { border-color: rgba(255, 213, 110, 0.5); }
 
-.tier-icon { color: #3a2f14; background: linear-gradient(160deg, #ffffff, #ece6d8 45%, #cdbc8c 100%); border-color: #d8c58f; }
+/* İkon — beyaz/altın mermer hissi */
+.tier-icon {
+  color: #3a2f14; border-color: #d8c58f;
+  background:
+    repeating-linear-gradient(115deg, rgba(180, 150, 80, 0.12) 0 2px, transparent 2px 22px),
+    linear-gradient(160deg, #ffffff, #ece6d8 45%, #cdbc8c 100%);
+}
 .tier-icon .pcard-overall, .tier-icon .pcard-tier { color: #8a6a1f; }
 .tier-icon .pcard-divider { background: rgba(120, 95, 30, 0.28); }
+.tier-icon .pcard-photo { border-color: rgba(120, 95, 30, 0.4); }
 
 /* ---------- Mobil ---------- */
 @media (max-width: 800px) {

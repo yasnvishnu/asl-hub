@@ -20,7 +20,8 @@ const SEED = {
     { id: "f4", date: "Yakında", home: "Abyss FK", away: "Nexorian", status: "Yakında" }
   ],
   matches: {},
-  manualPlayers: []
+  manualPlayers: [],
+  hiddenPlayers: []
 };
 
 export default async function handler(req, res) {
@@ -48,13 +49,13 @@ export default async function handler(req, res) {
       });
     }
 
-    const { teams, fixtures, matches, manualPlayers } = req.body || {};
+    const { teams, fixtures, matches, manualPlayers, hiddenPlayers } = req.body || {};
     if (!teams || !fixtures || !matches || !manualPlayers) {
       return res.status(400).json({ error: "Eksik veri." });
     }
 
     try {
-      await kv.set(KEY, { teams, fixtures, matches, manualPlayers });
+      await kv.set(KEY, { teams, fixtures, matches, manualPlayers, hiddenPlayers: hiddenPlayers || [] });
       return res.status(200).json({ ok: true });
     } catch {
       return res.status(500).json({ error: "Kaydedilemedi. Lütfen tekrar dene." });

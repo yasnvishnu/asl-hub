@@ -30,11 +30,29 @@ const INITIAL_FIXTURES = [
 const INITIAL_MATCHES = {};
 
 // ---------- Kart sistemi: overall hesaplama ----------
-// Herkes 50 overall'dan başlar. Attığı gol, yaptığı asist ve müdahale/kurtarışlara
-// göre kartın gücü (overall) otomatik yükselir. Üst sınır 99, alt sınır 50'dir.
+// Herkes 50 overall'dan başlar. Overall, TOPLAM istatistik yerine oyuncunun
+// MAÇ BAŞINA ORTALAMA performansına göre hesaplanır. Böylece sadece çok
+// maça çıkan (ama vasat oynayan) bir oyuncunun overall'ı sürekli tırmanmaz;
+// az maçta istikrarlı iyi oynayan biri de hemen doğru overall'ı görür.
+// Çok az sayıda maç oynamış olmak da küçük (en fazla +5) bir "tecrübe"
+// bonusuyla ödüllendirilir. Üst sınır 99, alt sınır 50'dir.
 function computeOverall(p) {
-  const impact = (p.g || 0) * 3 + (p.a || 0) * 2 + (p.tackles || 0) * 1 + (p.saves || 0) * 1.2;
-  return Math.max(50, Math.min(99, 50 + Math.round(impact / 2)));
+  const mp = p.mp || 0;
+  if (mp === 0) return 50;
+  const perG = (p.g || 0) / mp;
+  const perA = (p.a || 0) / mp;
+  const perTackle = (p.tackles || 0) / mp;
+  const perSave = (p.saves || 0) / mp;
+  const impact = perG * 6 + perA * 4 + perTackle * 1.4 + perSave * 1.1;
+  const experienceBonus = Math.min(5, Math.floor(mp / 5));
+  return Math.max(50, Math.min(99, Math.round(50 + impact + experienceBonus)));
+}
+
+// Bir oyuncuyu tekil olarak tanımlamak için kullanılan anahtar. İsimdeki
+// büyük/küçük harf ve baştaki/sondaki boşluk farkları aynı oyuncuyu iki
+// farklı kişi gibi göstermesin diye normalize edilir.
+function playerKey(name, team) {
+  return `${(name || "").trim().toLowerCase()}__${team}`;
 }
 
 function tierInfo(overall) {
@@ -106,6 +124,10 @@ export default function App() {
   const [fixtures, setFixtures] = useState(INITIAL_FIXTURES);
   const [matches, setMatches] = useState(INITIAL_MATCHES);
   const [manualPlayers, setManualPlayers] = useState([]);
+  // Yönetimin "silinsin" dediği oyuncu kartları (yanlış/istenmeyen kayıtlar
+  // dahil). Maç verisi silinmez, sadece bu kart listelerden gizlenir —
+  // istenirse admin panelinden geri getirilebilir.
+  const [hiddenPlayers, setHiddenPlayers] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [kvConfigured, setKvConfigured] = useState(true);
@@ -132,6 +154,7 @@ export default function App() {
         setFixtures(stateData.fixtures || INITIAL_FIXTURES);
         setMatches(stateData.matches || INITIAL_MATCHES);
         setManualPlayers(stateData.manualPlayers || []);
+        setHiddenPlayers(stateData.hiddenPlayers || []);
         setKvConfigured(stateData.kvConfigured !== false);
         setAdminUnlocked(Boolean(sessionData.authenticated));
       } catch {
@@ -162,7 +185,7 @@ export default function App() {
         const res = await fetch("/api/state", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ teams, fixtures, matches, manualPlayers })
+          body: JSON.stringify({ teams, fixtures, matches, manualPlayers, hiddenPlayers })
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -176,7 +199,7 @@ export default function App() {
       }
     }, 600);
     return () => clearTimeout(saveTimer.current);
-  }, [teams, fixtures, matches, manualPlayers, adminUnlocked]);
+  }, [teams, fixtures, matches, manualPlayers, hiddenPlayers, adminUnlocked]);
 
   // Yönetici olmayan ziyaretçiler için: sayfa açıkken periyodik olarak
   // sunucudaki en güncel veriyi çek, böylece maç/skor güncellemelerini
@@ -191,6 +214,7 @@ export default function App() {
         setFixtures(data.fixtures || INITIAL_FIXTURES);
         setMatches(data.matches || INITIAL_MATCHES);
         setManualPlayers(data.manualPlayers || []);
+        setHiddenPlayers(data.hiddenPlayers || []);
       } catch { /* geç */ }
     }, 12000);
     return () => clearInterval(id);
@@ -216,13 +240,21 @@ export default function App() {
     return Object.values(stats).sort((x, y) => y.pts - x.pts || y.gd - x.gd || y.gf - x.gf);
   }, [teams, matches]);
 
+  // Yönetimin gizlediği (sildiği) oyuncu kartlarının anahtar seti.
+  const hiddenKeySet = useMemo(
+    () => new Set(hiddenPlayers.map(h => h.key)),
+    [hiddenPlayers]
+  );
+
   // ---- Oyuncu istatistikleri (tüm maçlar toplanarak, otomatik) ----
-  const playerStats = useMemo(() => {
+  // Not: isim eşleştirmesi büyük/küçük harf ve boşluk farkına duyarsızdır,
+  // böylece aynı oyuncu farklı yazımlarla iki ayrı kart olarak görünmez.
+  const playerStatsAll = useMemo(() => {
     const map = {};
     Object.values(matches).forEach(m => {
       const addAll = (players, team) => (players || []).forEach(p => {
-        const key = `${p.name}__${team}`;
-        if (!map[key]) map[key] = { name: p.name, team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0 };
+        const key = playerKey(p.name, team);
+        if (!map[key]) map[key] = { name: (p.name || "").trim() || "Oyuncu", team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0 };
         const r = map[key];
         r.mp += 1;
         r.g += p.g || 0;
@@ -236,25 +268,44 @@ export default function App() {
     return Object.values(map);
   }, [matches]);
 
+  // Herkese görünen (gizlenmemiş) oyuncu istatistikleri.
+  const playerStats = useMemo(
+    () => playerStatsAll.filter(p => !hiddenKeySet.has(playerKey(p.name, p.team))),
+    [playerStatsAll, hiddenKeySet]
+  );
+
   // ---- Kart sistemi: istatistik bazlı kartlar + henüz maç oynamamış "yeni" kartlar ----
-  const playerCards = useMemo(() => {
+  // (Gizlenenler dahil TÜM kartlar — admin panelinde yönetmek için.)
+  const playerCardsAll = useMemo(() => {
     const map = {};
-    playerStats.forEach(p => {
-      const key = `${p.name.trim().toLowerCase()}__${p.team}`;
+    playerStatsAll.forEach(p => {
+      const key = playerKey(p.name, p.team);
       map[key] = {
-        name: p.name, team: p.team, mp: p.mp, g: p.g, a: p.a,
+        key, name: p.name, team: p.team, mp: p.mp, g: p.g, a: p.a,
         tackles: p.tackles, saves: p.saves,
         overall: computeOverall(p), isNew: false
       };
     });
     manualPlayers.forEach(mp => {
-      const key = `${mp.name.trim().toLowerCase()}__${mp.team}`;
+      const key = playerKey(mp.name, mp.team);
       if (!map[key]) {
-        map[key] = { name: mp.name, team: mp.team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0, overall: 50, isNew: true };
+        map[key] = { key, name: mp.name, team: mp.team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0, overall: 50, isNew: true };
       }
     });
     return Object.values(map);
-  }, [playerStats, manualPlayers]);
+  }, [playerStatsAll, manualPlayers]);
+
+  // Herkese görünen (gizlenmemiş) oyuncu kartları.
+  const playerCards = useMemo(
+    () => playerCardsAll.filter(p => !hiddenKeySet.has(p.key)),
+    [playerCardsAll, hiddenKeySet]
+  );
+
+  const hidePlayerCard = (name, team) => {
+    const key = playerKey(name, team);
+    setHiddenPlayers(prev => prev.some(h => h.key === key) ? prev : [...prev, { key, name, team }]);
+  };
+  const restorePlayerCard = key => setHiddenPlayers(prev => prev.filter(h => h.key !== key));
 
   const nav = [
     ["home", "Ana Sayfa", Home],
@@ -310,6 +361,7 @@ export default function App() {
     setFixtures(INITIAL_FIXTURES);
     setMatches(INITIAL_MATCHES);
     setManualPlayers([]);
+    setHiddenPlayers([]);
   };
 
   return (
@@ -372,6 +424,10 @@ export default function App() {
                 matches={matches} onDeleteMatch={deleteMatch}
                 onUpload={handleMatchUpload} onReset={resetAllData}
                 onLock={lockAdmin}
+                playerCardsAll={playerCardsAll}
+                hiddenPlayers={hiddenPlayers}
+                onHidePlayer={hidePlayerCard}
+                onRestorePlayer={restorePlayerCard}
               />
             ) : (
               <AdminGate onUnlock={unlockAdmin} />
@@ -629,7 +685,7 @@ function CardsPage({ playerCards }) {
   const active = [...playerCards.filter(p => !p.isNew)].sort((a, b) => b.overall - a.overall || b.g - a.g || b.a - a.a);
 
   return (
-    <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Attığı gol, yaptığı asist ve müdahale/kurtarışlara göre kartın gücü otomatik yükselir.">
+    <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Kartın gücü, toplam istatistik değil maç başına ortalama performans (gol, asist, müdahale, kurtarış) baz alınarak otomatik hesaplanır.">
       {newPlayers.length > 0 && (
         <>
           <div className="sectionHead" style={{ marginBottom: 16 }}>
@@ -656,24 +712,47 @@ function CardsPage({ playerCards }) {
   );
 }
 
+function initialsOf(name) {
+  return (name || "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(w => w[0])
+    .join("")
+    .toUpperCase();
+}
+
 function PlayerCard({ player }) {
   const tier = tierInfo(player.overall);
   return (
     <div className={`pcard tier-${tier.key}`}>
       <div className="pcard-shine" />
       {player.isNew && <span className="pcard-newTag">YENİ</span>}
-      <div className="pcard-top">
-        <span className="pcard-overall">{player.overall}</span>
-        <span className="pcard-tier">{tier.label}</span>
-      </div>
-      <div className="pcard-name">{player.name}</div>
-      <div className="pcard-team">{player.team}</div>
-      <div className="pcard-divider" />
-      <div className="pcard-stats">
-        <div><b>{player.g}</b><span>GOL</span></div>
-        <div><b>{player.a}</b><span>ASİST</span></div>
-        <div><b>{player.saves}</b><span>KURT.</span></div>
-        <div><b>{player.mp}</b><span>MAÇ</span></div>
+      <div className="pcard-inner">
+        <div className="pcard-head">
+          <div className="pcard-rating">
+            <span className="pcard-overall">{player.overall}</span>
+            <span className="pcard-tier">{tier.label}</span>
+          </div>
+          <div className="pcard-photo"><span>{initialsOf(player.name)}</span></div>
+        </div>
+
+        <div className="pcard-nameplate">
+          <div className="pcard-name">{player.name}</div>
+          <div className="pcard-teamRow">
+            <span className="pcard-teamDot" />
+            <span className="pcard-team">{player.team}</span>
+          </div>
+        </div>
+
+        <div className="pcard-divider" />
+
+        <div className="pcard-stats">
+          <div><b>{player.g}</b><span>GOL</span></div>
+          <div><b>{player.a}</b><span>ASİST</span></div>
+          <div><b>{player.saves}</b><span>KURT.</span></div>
+          <div><b>{player.mp}</b><span>MAÇ</span></div>
+        </div>
       </div>
     </div>
   );
@@ -735,7 +814,10 @@ function AdminGate({ onUnlock }) {
 }
 
 // ---------- Yönetim paneli ----------
-function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, matches, onDeleteMatch, onUpload, onReset, onLock }) {
+function AdminPanel({
+  teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, matches, onDeleteMatch,
+  onUpload, onReset, onLock, playerCardsAll, hiddenPlayers, onHidePlayer, onRestorePlayer
+}) {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamLogo, setNewTeamLogo] = useState(null);
   const [teamLogoError, setTeamLogoError] = useState("");
@@ -950,6 +1032,46 @@ function AdminPanel({ teams, setTeams, fixtures, setFixtures, manualPlayers, set
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="adminCard">
+          <h3><CreditCard size={20} /> Kart Yönetimi</h3>
+          <p>
+            Yanlış görünen, istenmeyen ya da hatalı bir oyuncu kartı mı var? (Örn. bir takım adının
+            oyuncu gibi listelenmesi.) Aşağıdan istediğin kartı gizleyebilirsin — maç verisi silinmez,
+            kart sadece herkesin gördüğü listeden kaldırılır ve istersen tekrar geri getirebilirsin.
+          </p>
+          <div className="adminList">
+            {playerCardsAll.filter(p => !hiddenPlayers.some(h => h.key === p.key)).length === 0 && (
+              <p className="emptyNote small">Gösterilecek kart yok.</p>
+            )}
+            {playerCardsAll
+              .filter(p => !hiddenPlayers.some(h => h.key === p.key))
+              .sort((a, b) => a.name.localeCompare(b.name, "tr"))
+              .map(p => (
+                <div key={p.key} className="adminListItem">
+                  <span><b>{p.name}</b> <small>({p.team} · {p.overall} OVR)</small></span>
+                  <button onClick={() => onHidePlayer(p.name, p.team)} className="danger" title="Kartı gizle">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+          </div>
+          {hiddenPlayers.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 22 }}><RotateCcw size={18} /> Gizlenen Kartlar</h3>
+              <div className="adminList">
+                {hiddenPlayers.map(h => (
+                  <div key={h.key} className="adminListItem">
+                    <span><b>{h.name}</b> <small>({h.team})</small></span>
+                    <button onClick={() => onRestorePlayer(h.key)} className="lockBtn" title="Geri getir">
+                      <RotateCcw size={14} /> Geri Getir
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="adminCard">
