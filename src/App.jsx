@@ -33,8 +33,7 @@ const INITIAL_MATCHES = {};
 // Herkes 50 overall'dan başlar. Her istatistik türünün kendi "katsayısı"
 // vardır ve oyuncu maç oynadıkça TOPLAM (kariyer boyu biriken) istatistiği
 // bu katsayılarla çarpılıp overall'a eklenir — yani bir golün, bir asistin
-// ve bir kurtarışın overall'a katkısı sabittir, tek bir maçta atılan tek
-// gol asla kartı 99'a fırlatmaz:
+// ve bir kurtarışın overall'a katkısı sabittir
 //   1 GOL      = 1.0 puan
 //   1 ASİST    = 0.6 puan
 //   1 KURTARIŞ = 0.3 puan
