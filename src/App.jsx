@@ -45,7 +45,7 @@ const INITIAL_MATCHES = {};
 // bir etki ~ +10 overall gibi görünür, ama 100 gollük etki +32 civarındadır,
 // +100 değil). Ayrıca uzun süredir aktif oynayan oyuncular için küçük
 // (en fazla +4) bir "tecrübe" bonusu vardır. Üst sınır 99, alt sınır 50'dir.
-const OVERALL_COEF = { goal: 1.0, assist: 0.6, save: 0.3, tackle: 0.2 };
+const OVERALL_COEF = { goal: 0.8, assist: 0.6, save: 0.3, tackle: 0.1 };
 const OVERALL_SCALE = 3.2;
 
 function computeOverall(p) {
