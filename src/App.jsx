@@ -33,11 +33,12 @@ const INITIAL_MATCHES = {};
 // Herkes 50 overall'dan başlar. Her istatistik türünün kendi "katsayısı"
 // vardır ve oyuncu maç oynadıkça TOPLAM (kariyer boyu biriken) istatistiği
 // bu katsayılarla çarpılıp overall'a eklenir — yani bir golün, bir asistin
-// ve bir kurtarışın overall'a katkısı sabittir
-//   1 GOL      = 0.8 puan
+// ve bir kurtarışın overall'a katkısı sabittir, tek bir maçta atılan tek
+// gol asla kartı 99'a fırlatmaz:
+//   1 GOL      = 1.0 puan
 //   1 ASİST    = 0.6 puan
 //   1 KURTARIŞ = 0.3 puan
-//   1 MÜDAHALE = 0.1 puan
+//   1 MÜDAHALE = 0.2 puan
 // Bu "ham etki puanı" doğrudan overall'a eklenmez; kareköküyle yumuşatılıp
 // (x3.2 ile ölçeklenip) eklenir. Böylece kart, insan gibi kademeli kademeli
 // yükselir: az istatistikte hızlı görünür bir artış olur, oyuncu efsane
@@ -45,7 +46,7 @@ const INITIAL_MATCHES = {};
 // bir etki ~ +10 overall gibi görünür, ama 100 gollük etki +32 civarındadır,
 // +100 değil). Ayrıca uzun süredir aktif oynayan oyuncular için küçük
 // (en fazla +4) bir "tecrübe" bonusu vardır. Üst sınır 99, alt sınır 50'dir.
-const OVERALL_COEF = { goal: 0.8, assist: 0.6, save: 0.3, tackle: 0.1 };
+const OVERALL_COEF = { goal: 1.0, assist: 0.6, save: 0.3, tackle: 0.2 };
 const OVERALL_SCALE = 3.2;
 
 function computeOverall(p) {
@@ -132,6 +133,7 @@ export default function App() {
   const [page, setPage] = useState("home");
   const [open, setOpen] = useState(false);
   const [activeMatchId, setActiveMatchId] = useState(null);
+  const [activeTeamName, setActiveTeamName] = useState(null);
 
   const [teams, setTeams] = useState(INITIAL_TEAMS);
   const [fixtures, setFixtures] = useState(INITIAL_FIXTURES);
@@ -141,6 +143,12 @@ export default function App() {
   // dahil). Maç verisi silinmez, sadece bu kart listelerden gizlenir —
   // istenirse admin panelinden geri getirilebilir.
   const [hiddenPlayers, setHiddenPlayers] = useState([]);
+  // Yönetimin elle düzelttiği oyuncu -> takım eşleşmeleri. Bir oyuncunun
+  // ismi burada varsa, o oyuncunun TÜM maçlardaki istatistikleri artık
+  // maçtaki orijinal takım etiketi ne olursa olsun bu takıma yazılır —
+  // böylece admin, yanlış/güncel olmayan takım ataması olan bir oyuncuyu
+  // panelden tek tıkla düzeltebilir.
+  const [playerTeamOverrides, setPlayerTeamOverrides] = useState({});
 
   const [loading, setLoading] = useState(true);
   const [kvConfigured, setKvConfigured] = useState(true);
@@ -168,6 +176,7 @@ export default function App() {
         setMatches(stateData.matches || INITIAL_MATCHES);
         setManualPlayers(stateData.manualPlayers || []);
         setHiddenPlayers(stateData.hiddenPlayers || []);
+        setPlayerTeamOverrides(stateData.playerTeamOverrides || {});
         setKvConfigured(stateData.kvConfigured !== false);
         setAdminUnlocked(Boolean(sessionData.authenticated));
       } catch {
@@ -198,7 +207,7 @@ export default function App() {
         const res = await fetch("/api/state", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ teams, fixtures, matches, manualPlayers, hiddenPlayers })
+          body: JSON.stringify({ teams, fixtures, matches, manualPlayers, hiddenPlayers, playerTeamOverrides })
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -212,7 +221,7 @@ export default function App() {
       }
     }, 600);
     return () => clearTimeout(saveTimer.current);
-  }, [teams, fixtures, matches, manualPlayers, hiddenPlayers, adminUnlocked]);
+  }, [teams, fixtures, matches, manualPlayers, hiddenPlayers, playerTeamOverrides, adminUnlocked]);
 
   // Yönetici olmayan ziyaretçiler için: sayfa açıkken periyodik olarak
   // sunucudaki en güncel veriyi çek, böylece maç/skor güncellemelerini
@@ -228,6 +237,7 @@ export default function App() {
         setMatches(data.matches || INITIAL_MATCHES);
         setManualPlayers(data.manualPlayers || []);
         setHiddenPlayers(data.hiddenPlayers || []);
+        setPlayerTeamOverrides(data.playerTeamOverrides || {});
       } catch { /* geç */ }
     }, 12000);
     return () => clearInterval(id);
@@ -262,16 +272,23 @@ export default function App() {
   // ---- Oyuncu istatistikleri (tüm maçlar toplanarak, otomatik) ----
   // Not: isim eşleştirmesi büyük/küçük harf ve boşluk farkına duyarsızdır,
   // böylece aynı oyuncu farklı yazımlarla iki ayrı kart olarak görünmez.
+  // Bir oyuncu için admin panelinden takım düzeltmesi (playerTeamOverrides)
+  // yapılmışsa, o oyuncunun TÜM maçlardaki istatistikleri maçtaki orijinal
+  // takım etiketi ne olursa olsun düzeltilmiş takıma yazılır.
   const playerStatsAll = useMemo(() => {
     const map = {};
     Object.values(matches).forEach(m => {
       const addAll = (players, team) => (players || []).forEach(p => {
-        const key = playerKey(p.name, team);
-        if (!map[key]) map[key] = { name: (p.name || "").trim() || "Oyuncu", team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0 };
+        const name = (p.name || "").trim() || "Oyuncu";
+        const resolvedTeam = playerTeamOverrides[name.toLowerCase()] || team;
+        const key = playerKey(name, resolvedTeam);
+        if (!map[key]) map[key] = { name, team: resolvedTeam, mp: 0, g: 0, a: 0, tackles: 0, saves: 0 };
         const r = map[key];
         r.mp += 1;
         r.g += p.g || 0;
         r.a += p.a || 0;
+        // Sadece BAŞARILI müdaheleler sayılır (deneme/toplam değil) —
+        // successCount("3/21") gibi bir metnin başarılı kısmını (3) alır.
         r.tackles += successCount(p.foot) + successCount(p.slide);
         r.saves += (p.def || 0) + (p.catch || 0);
       });
@@ -279,7 +296,7 @@ export default function App() {
       addAll(m.awayPlayers, m.awayTeam);
     });
     return Object.values(map);
-  }, [matches]);
+  }, [matches, playerTeamOverrides]);
 
   // Herkese görünen (gizlenmemiş) oyuncu istatistikleri.
   const playerStats = useMemo(
@@ -300,19 +317,34 @@ export default function App() {
       };
     });
     manualPlayers.forEach(mp => {
-      const key = playerKey(mp.name, mp.team);
+      const resolvedTeam = playerTeamOverrides[(mp.name || "").trim().toLowerCase()] || mp.team;
+      const key = playerKey(mp.name, resolvedTeam);
       if (!map[key]) {
-        map[key] = { key, name: mp.name, team: mp.team, mp: 0, g: 0, a: 0, tackles: 0, saves: 0, overall: 50, isNew: true };
+        map[key] = { key, name: mp.name, team: resolvedTeam, mp: 0, g: 0, a: 0, tackles: 0, saves: 0, overall: 50, isNew: true };
       }
     });
     return Object.values(map);
-  }, [playerStatsAll, manualPlayers]);
+  }, [playerStatsAll, manualPlayers, playerTeamOverrides]);
 
   // Herkese görünen (gizlenmemiş) oyuncu kartları.
   const playerCards = useMemo(
     () => playerCardsAll.filter(p => !hiddenKeySet.has(p.key)),
     [playerCardsAll, hiddenKeySet]
   );
+
+  // Takım adına göre logo eşlemesi — fikstür, takımlar ve kart sayfalarında
+  // ortak kullanılır.
+  const crestByTeam = useMemo(() => {
+    const map = {};
+    teams.forEach(t => { if (t.logo) map[t.name] = t.logo; });
+    return map;
+  }, [teams]);
+
+  const setPlayerTeam = (name, team) => {
+    const key = (name || "").trim().toLowerCase();
+    if (!key) return;
+    setPlayerTeamOverrides(prev => ({ ...prev, [key]: team }));
+  };
 
   const hidePlayerCard = (name, team) => {
     const key = playerKey(name, team);
@@ -375,6 +407,7 @@ export default function App() {
     setMatches(INITIAL_MATCHES);
     setManualPlayers([]);
     setHiddenPlayers([]);
+    setPlayerTeamOverrides({});
   };
 
   return (
@@ -402,20 +435,39 @@ export default function App() {
         )}
 
         {!loading && page === "home" && (
-          <HomePage go={go} teams={teams} fixtures={fixtures} matches={matches} standings={standings} playerStats={playerStats} />
+          <HomePage go={go} teams={teams} fixtures={fixtures} matches={matches} standings={standings} playerStats={playerStats} crestByTeam={crestByTeam} />
         )}
 
-        {!loading && page === "teams" && <TeamsPage teams={teams} standings={standings} />}
+        {!loading && page === "teams" && (
+          <TeamsPage
+            teams={teams} standings={standings}
+            onOpenTeam={name => { setActiveTeamName(name); go("teamDetail"); }}
+          />
+        )}
 
         {!loading && page === "standings" && <StandingsPage standings={standings} />}
 
         {!loading && page === "fixtures" && (
-          <FixturesPage fixtures={fixtures} onOpenMatch={id => { setActiveMatchId(id); go("matchDetail"); }} />
+          <FixturesPage
+            fixtures={fixtures} crestByTeam={crestByTeam}
+            onOpenMatch={id => { setActiveMatchId(id); go("matchDetail"); }}
+          />
         )}
 
         {!loading && page === "stats" && <PlayerStatsPage playerStats={playerStats} />}
 
-        {!loading && page === "cards" && <CardsPage playerCards={playerCards} teams={teams} />}
+        {!loading && page === "cards" && <CardsPage playerCards={playerCards} teams={teams} crestByTeam={crestByTeam} />}
+
+        {!loading && page === "teamDetail" && activeTeamName && (
+          <TeamDetailPage
+            teamName={activeTeamName}
+            teams={teams}
+            standings={standings}
+            playerCards={playerCards}
+            crestByTeam={crestByTeam}
+            goBack={() => go("teams")}
+          />
+        )}
 
         {!loading && page === "admin" && (
           <>
@@ -441,6 +493,7 @@ export default function App() {
                 hiddenPlayers={hiddenPlayers}
                 onHidePlayer={hidePlayerCard}
                 onRestorePlayer={restorePlayerCard}
+                onSetPlayerTeam={setPlayerTeam}
               />
             ) : (
               <AdminGate onUnlock={unlockAdmin} />
@@ -477,8 +530,17 @@ function Ticker({ fixtures }) {
   );
 }
 
+// Takım logosu rozeti — küçük kare/daire logo veya baş harfler.
+function TeamBadge({ name, crest, size = 26 }) {
+  return (
+    <span className="matchTeamLogo" style={{ width: size, height: size }}>
+      {crest ? <img src={crest} alt="" /> : (name || "").split(" ").map(x => x[0]).join("").slice(0, 3)}
+    </span>
+  );
+}
+
 // ---------- Ana sayfa ----------
-function HomePage({ go, teams, fixtures, matches, standings, playerStats }) {
+function HomePage({ go, teams, fixtures, matches, standings, playerStats, crestByTeam = {} }) {
   const matchList = Object.values(matches);
   const totalGoals = matchList.reduce((s, m) => s + m.homeScore + m.awayScore, 0);
   const topScorer = [...playerStats].sort((a, b) => b.g - a.g)[0];
@@ -535,7 +597,11 @@ function HomePage({ go, teams, fixtures, matches, standings, playerStats }) {
             {upcoming.map(f => (
               <div className="fixture" key={f.id}>
                 <span className="date">{f.date}</span>
-                <div className="match"><b>{f.home}</b><span className="scoreBadge">{f.status}</span><b>{f.away}</b></div>
+                <div className="match">
+                  <span className="matchTeam"><TeamBadge name={f.home} crest={crestByTeam[f.home]} /><b>{f.home}</b></span>
+                  <span className="scoreBadge">{f.status}</span>
+                  <span className="matchTeam"><TeamBadge name={f.away} crest={crestByTeam[f.away]} /><b>{f.away}</b></span>
+                </div>
               </div>
             ))}
           </div>
@@ -546,20 +612,20 @@ function HomePage({ go, teams, fixtures, matches, standings, playerStats }) {
 }
 
 // ---------- Takımlar ----------
-function TeamsPage({ teams, standings }) {
+function TeamsPage({ teams, standings, onOpenTeam }) {
   const byName = useMemo(() => Object.fromEntries(standings.map(s => [s.name, s])), [standings]);
   return (
     <Section title="Takımlar" subtitle="Anadolu Strikers Ligi'nde mücadele eden ekipler.">
       <div className="teamGrid">
-        {teams.map(t => <TeamCard key={t.id} team={t} record={byName[t.name]} />)}
+        {teams.map(t => <TeamCard key={t.id} team={t} record={byName[t.name]} onClick={() => onOpenTeam(t.name)} />)}
       </div>
     </Section>
   );
 }
 
-function TeamCard({ team, record }) {
+function TeamCard({ team, record, onClick }) {
   return (
-    <article className="team">
+    <button type="button" className="team" onClick={onClick}>
       <div className={`logo ${team.logo ? "hasImg" : ""}`}>
         {team.logo
           ? <img src={team.logo} alt={`${team.name} logosu`} />
@@ -572,7 +638,44 @@ function TeamCard({ team, record }) {
           : <span>Henüz maç oynanmadı</span>}
       </div>
       <ChevronRight />
-    </article>
+    </button>
+  );
+}
+
+// ---------- Takım detayı: kadro ----------
+function TeamDetailPage({ teamName, teams, standings, playerCards, crestByTeam, goBack }) {
+  const team = teams.find(t => t.name === teamName);
+  const record = standings.find(s => s.name === teamName);
+  const roster = [...playerCards.filter(p => p.team === teamName)].sort((a, b) => b.overall - a.overall || b.g - a.g);
+
+  return (
+    <div className="matchDetailView">
+      <button className="backBtn" onClick={goBack}>← Takımlara Dön</button>
+
+      <div className="teamDetailHead">
+        <div className="teamDetailCrest">
+          {team?.logo
+            ? <img src={team.logo} alt={`${teamName} logosu`} />
+            : (teamName || "").split(" ").map(x => x[0]).join("").slice(0, 3)}
+        </div>
+        <div className="teamDetailInfo">
+          <h1>{teamName}</h1>
+          <span>
+            {record
+              ? `${record.played} maç · ${record.wins}G ${record.draws}B ${record.losses}M · ${record.pts} PUAN`
+              : "Henüz maç oynanmadı"}
+          </span>
+        </div>
+      </div>
+
+      {roster.length === 0 ? (
+        <p className="emptyNote">Bu takımda henüz kart oluşturacak oyuncu verisi yok.</p>
+      ) : (
+        <div className="cardGrid">
+          {roster.map(p => <PlayerCard key={p.key || `${p.name}__${p.team}`} player={p} crest={crestByTeam[p.team]} />)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -600,7 +703,7 @@ function StandingsPage({ standings }) {
 }
 
 // ---------- Fikstür ----------
-function FixturesPage({ fixtures, onOpenMatch }) {
+function FixturesPage({ fixtures, crestByTeam = {}, onOpenMatch }) {
   const [filter, setFilter] = useState("Tümü");
   const isDone = f => Boolean(f.matchId) || /\d+\s*-\s*\d+/.test(f.status || "");
   const rows = fixtures.filter(f => filter === "Tümü" ? true : filter === "Tamamlanan" ? isDone(f) : !isDone(f));
@@ -617,7 +720,11 @@ function FixturesPage({ fixtures, onOpenMatch }) {
         {rows.map((f, i) => (
           <div className={`fixture ${f.matchId ? "clickable" : ""}`} key={f.id || i} onClick={() => f.matchId && onOpenMatch(f.matchId)}>
             <span className="date">{f.date}</span>
-            <div className="match"><b>{f.home}</b><span className="scoreBadge">{f.status}</span><b>{f.away}</b></div>
+            <div className="match">
+              <span className="matchTeam"><TeamBadge name={f.home} crest={crestByTeam[f.home]} /><b>{f.home}</b></span>
+              <span className="scoreBadge">{f.status}</span>
+              <span className="matchTeam"><TeamBadge name={f.away} crest={crestByTeam[f.away]} /><b>{f.away}</b></span>
+            </div>
             {f.matchId && <span className="detailBtn"><BarChart2 size={14} /> İstatistikleri Gör</span>}
           </div>
         ))}
@@ -693,14 +800,15 @@ function LeaderList({ icon: Icon, title, data, field }) {
 }
 
 // ---------- Kart sistemi ----------
-function CardsPage({ playerCards, teams = [] }) {
+function CardsPage({ playerCards, teams = [], crestByTeam: crestByTeamProp }) {
   const newPlayers = playerCards.filter(p => p.isNew);
   const active = [...playerCards.filter(p => !p.isNew)].sort((a, b) => b.overall - a.overall || b.g - a.g || b.a - a.a);
-  const crestByTeam = useMemo(() => {
+  const crestByTeamLocal = useMemo(() => {
     const map = {};
     teams.forEach(t => { if (t.logo) map[t.name] = t.logo; });
     return map;
   }, [teams]);
+  const crestByTeam = crestByTeamProp || crestByTeamLocal;
 
   return (
     <Section title="Oyuncu Kartları" subtitle="Herkes 50 overall'dan başlar. Gol, asist, kurtarış ve müdahalenin kendi katsayısı vardır; kart, biriken istatistiklere göre kademeli olarak yükselir — tek maçta atılan tek bir gol kartı asla 99'a fırlatmaz.">
@@ -853,7 +961,7 @@ function AdminGate({ onUnlock }) {
 // ---------- Yönetim paneli ----------
 function AdminPanel({
   teams, setTeams, fixtures, setFixtures, manualPlayers, setManualPlayers, matches, onDeleteMatch,
-  onUpload, onReset, onLock, playerCardsAll, hiddenPlayers, onHidePlayer, onRestorePlayer
+  onUpload, onReset, onLock, playerCardsAll, hiddenPlayers, onHidePlayer, onRestorePlayer, onSetPlayerTeam
 }) {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamLogo, setNewTeamLogo] = useState(null);
@@ -1112,6 +1220,28 @@ function AdminPanel({
         </div>
 
         <div className="adminCard">
+          <h3><Shield size={20} /> Oyuncu Takımı Yönetimi</h3>
+          <p>
+            Bir oyuncu yanlış ya da güncel olmayan bir takımda mı görünüyor (örn. takım değiştirdi)?
+            Aşağıdan doğru takımı seç — o oyuncunun geçmiş ve gelecek TÜM maç istatistikleri artık
+            seçtiğin takıma yazılır.
+          </p>
+          <div className="adminList">
+            {playerCardsAll.length === 0 && <p className="emptyNote small">Henüz oyuncu yok.</p>}
+            {[...playerCardsAll]
+              .sort((a, b) => a.name.localeCompare(b.name, "tr"))
+              .map(p => (
+                <div key={p.key || `${p.name}__${p.team}`} className="playerTeamRow">
+                  <span><b>{p.name}</b><small>{p.overall} OVR</small></span>
+                  <select value={p.team} onChange={e => onSetPlayerTeam(p.name, e.target.value)}>
+                    {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                  </select>
+                </div>
+              ))}
+          </div>
+        </div>
+
+        <div className="adminCard">
           <h3><Trash2 size={20} /> Yüklenen Maçlar</h3>
           <p>Hatalı yüklenen ya da kaldırılmak istenen bir maç istatistiğini buradan silebilirsin. Silinince ilgili fikstür maddesi otomatik olarak "Yakında" durumuna döner, puan durumu ve oyuncu kartları da güncellenir.</p>
           <div className="adminList">
@@ -1209,18 +1339,22 @@ function PlayerTable({ teamName, players = [], type }) {
         <table>
           <thead><tr><th>Oyuncu</th><th>G</th><th>A</th><th>Pas</th><th>Ayak M.</th><th>Kayma M.</th><th>Defans</th><th>Yakalama</th></tr></thead>
           <tbody>
-            {players.map((p, i) => (
-              <tr key={i}>
-                <td>{p.name}</td>
-                <td className={p.g === 0 ? "zero" : ""}>{p.g}</td>
-                <td className={p.a === 0 ? "zero" : ""}>{p.a}</td>
-                <td className={p.pass === 0 ? "zero" : ""}>{p.pass}</td>
-                <td>{p.foot}</td>
-                <td>{p.slide}</td>
-                <td className={p.def === 0 ? "zero" : ""}>{p.def}</td>
-                <td className={p.catch === 0 ? "zero" : ""}>{p.catch}</td>
-              </tr>
-            ))}
+            {players.map((p, i) => {
+              const footSuccess = successCount(p.foot);
+              const slideSuccess = successCount(p.slide);
+              return (
+                <tr key={i}>
+                  <td>{p.name}</td>
+                  <td className={p.g === 0 ? "zero" : ""}>{p.g}</td>
+                  <td className={p.a === 0 ? "zero" : ""}>{p.a}</td>
+                  <td className={p.pass === 0 ? "zero" : ""}>{p.pass}</td>
+                  <td className={footSuccess === 0 ? "zero" : ""} title={`Toplam deneme: ${p.foot}`}>{footSuccess}</td>
+                  <td className={slideSuccess === 0 ? "zero" : ""} title={`Toplam deneme: ${p.slide}`}>{slideSuccess}</td>
+                  <td className={p.def === 0 ? "zero" : ""}>{p.def}</td>
+                  <td className={p.catch === 0 ? "zero" : ""}>{p.catch}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
